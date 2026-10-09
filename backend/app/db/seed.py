@@ -2,6 +2,7 @@
 Database Seeding for ACM SVNIT Smart Document Generator.
 Initializes default pre-configured roles, pre-approved clauses, and template metadata.
 """
+import os
 import uuid
 import json
 from app.db.database import get_db, init_db
@@ -10,29 +11,38 @@ from app.core.security import hash_password
 def seed_database():
     init_db()
     with get_db() as conn:
-        # 1. Seed demo users for testing each role
-        users_to_seed = [
-            ("usr-admin-01", "admin@svnit.acm.org", "Admin@1234", "System Administrator", "admin"),
-            ("usr-author-01", "author@svnit.acm.org", "Author@1234", "Ansh Gupta (Author)", "author"),
-            ("usr-reviewer-01", "reviewer@svnit.acm.org", "Reviewer@1234", "Shri Rakesh Gohil (Reviewer)", "reviewer"),
-            ("usr-approver-01", "approver@svnit.acm.org", "Approver@1234", "Dr. Sankita J. Patel (Approver)", "approver"),
-            ("usr-tmpladmin-01", "tmpladmin@svnit.acm.org", "TmplAdmin@1234", "Template Admin", "template_admin"),
-            ("usr-viewer-01", "viewer@svnit.acm.org", "Viewer@1234", "Guest Viewer", "viewer"),
-            ("guest-user", "guest@svnit.acm.org", "Guest@1234", "Guest User", "viewer"),
-        ]
+        # 1. Seed demo users only in testing/dev environments if enabled
+        should_seed_users = (
+            os.getenv("PYTEST_CURRENT_TEST") is not None
+            or os.getenv("SEED_DEMO_USERS", "false").lower() in ("1", "true")
+        )
 
-        for u_id, email, pwd, name, role in users_to_seed:
-            existing = conn.execute("SELECT id FROM users WHERE email = ?", (email,)).fetchone()
-            if not existing:
-                conn.execute(
-                    "INSERT INTO users (id, email, hashed_password, full_name, role, status, is_active) VALUES (?, ?, ?, ?, ?, 'active', 1)",
-                    (u_id, email, hash_password(pwd), name, role)
-                )
-            else:
-                conn.execute(
-                    "UPDATE users SET status = 'active', is_active = 1 WHERE email = ?",
-                    (email,)
-                )
+        if should_seed_users:
+            users_to_seed = [
+                ("usr-admin-01", "admin@svnit.acm.org", "Admin@1234", "System Administrator", "admin"),
+                ("usr-author-01", "author@svnit.acm.org", "Author@1234", "Ansh Gupta (Author)", "author"),
+                ("usr-reviewer-01", "reviewer@svnit.acm.org", "Reviewer@1234", "Shri Rakesh Gohil (Reviewer)", "reviewer"),
+                ("usr-approver-01", "approver@svnit.acm.org", "Approver@1234", "Dr. Sankita J. Patel (Approver)", "approver"),
+                ("usr-tmpladmin-01", "tmpladmin@svnit.acm.org", "TmplAdmin@1234", "Template Admin", "template_admin"),
+                ("usr-viewer-01", "viewer@svnit.acm.org", "Viewer@1234", "Guest Viewer", "viewer"),
+                ("guest-user", "guest@svnit.acm.org", "Guest@1234", "Guest User", "viewer"),
+            ]
+
+            for u_id, email, pwd, name, role in users_to_seed:
+                existing = conn.execute("SELECT id FROM users WHERE email = ?", (email,)).fetchone()
+                if not existing:
+                    conn.execute(
+                        "INSERT INTO users (id, email, hashed_password, full_name, role, status, is_active, is_verified) VALUES (?, ?, ?, ?, ?, 'active', 1, 1)",
+                        (u_id, email, hash_password(pwd), name, role)
+                    )
+                else:
+                    conn.execute(
+                        "UPDATE users SET hashed_password = ?, status = 'active', is_active = 1, is_verified = 1 WHERE email = ?",
+                        (hash_password(pwd), email)
+                    )
+        else:
+            # In production, ensure existing users have is_verified synchronized
+            conn.execute("UPDATE users SET is_verified = 1 WHERE is_verified IS NULL OR is_verified = 0 AND status = 'active'")
 
         # 2. Seed pre-approved Reusable Clauses
         clauses_to_seed = [

@@ -125,7 +125,7 @@ def get_current_user(credentials: Optional[HTTPAuthorizationCredentials] = Secur
         from app.db.database import get_db
         with get_db() as conn:
             user_row = conn.execute(
-                "SELECT id, email, full_name, role, status, is_active FROM users WHERE id = ?",
+                "SELECT id, email, full_name, role, status, is_active, is_verified FROM users WHERE id = ?",
                 (user.get("sub"),)
             ).fetchone()
             if not user_row or user_row["is_active"] == 0 or user_row["status"] == "inactive":
@@ -134,6 +134,7 @@ def get_current_user(credentials: Optional[HTTPAuthorizationCredentials] = Secur
             user["full_name"] = user_row["full_name"]
             user["status"] = user_row["status"]
             user["is_active"] = user_row["is_active"]
+            user["is_verified"] = user_row["is_verified"] if "is_verified" in user_row.keys() else 1
     except Exception:
         pass
     return user
@@ -149,7 +150,7 @@ def require_authenticated_user(credentials: Optional[HTTPAuthorizationCredential
     from app.db.database import get_db
     with get_db() as conn:
         user_row = conn.execute(
-            "SELECT id, email, full_name, role, status, is_active FROM users WHERE id = ?",
+            "SELECT id, email, full_name, role, status, is_active, is_verified FROM users WHERE id = ?",
             (user.get("sub"),)
         ).fetchone()
         if not user_row:
@@ -164,6 +165,7 @@ def require_authenticated_user(credentials: Optional[HTTPAuthorizationCredential
         user["full_name"] = user_row["full_name"]
         user["status"] = user_row["status"]
         user["is_active"] = user_row["is_active"]
+        user["is_verified"] = user_row["is_verified"] if "is_verified" in user_row.keys() else 1
         
     return user
 

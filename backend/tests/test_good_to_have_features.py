@@ -368,32 +368,55 @@ def test_template_preview_and_config():
 # ============================================================
 
 def test_rbac_register_login_and_role_protection():
+    from app.services.email_service import get_latest_sent_otp
+
     # 1. Register new author
     email = f"testauthor_{uuid.uuid4().hex[:8]}@svnit.acm.org"
     reg = client.post("/api/auth/register", json={
         "email": email,
         "password": "Password@123",
-        "full_name": "Test RBAC Author",
-        "role": "author"
+        "confirm_password": "Password@123",
+        "full_name": "Test RBAC Author"
     })
     assert reg.status_code == 200
-    assert reg.json()["role"] == "author"
-    token = reg.json()["access_token"]
+    assert reg.json()["success"] is True
 
-    # 2. Login
-    login_res = client.post("/api/auth/login", json={
+    # 2. Verify Email OTP to activate account
+    signup_otp = get_latest_sent_otp(email, "signup_verification")
+    assert signup_otp is not None, "Signup OTP must be dispatched"
+    verify_reg = client.post("/api/auth/verify-email-otp", json={
+        "email": email,
+        "otp": signup_otp
+    })
+    assert verify_reg.status_code == 200
+    assert verify_reg.json()["success"] is True
+
+    # 3. Login Step 1: Submit credentials to receive login OTP challenge
+    login_step1 = client.post("/api/auth/login", json={
         "email": email,
         "password": "Password@123"
     })
-    assert login_res.status_code == 200
-    assert "access_token" in login_res.json()
+    assert login_step1.status_code == 200
+    assert login_step1.json()["requires_otp"] is True
+    challenge_id = login_step1.json()["challenge_id"]
 
-    # 3. Check profile
+    # 4. Login Step 2: Verify Login 2FA OTP to obtain access token
+    login_otp = get_latest_sent_otp(email, "login_2fa")
+    assert login_otp is not None, "Login 2FA OTP must be dispatched"
+    login_step2 = client.post("/api/auth/verify-login-otp", json={
+        "challenge_id": challenge_id,
+        "otp": login_otp
+    })
+    assert login_step2.status_code == 200
+    assert "access_token" in login_step2.json()
+    token = login_step2.json()["access_token"]
+
+    # 5. Check profile
     me_res = client.get("/api/auth/me", headers={"Authorization": f"Bearer {token}"})
     assert me_res.status_code == 200
     assert me_res.json()["user"]["role"] == "author"
 
-    # 4. Author cannot modify protected template configuration (requires template_admin)
+    # 6. Author cannot modify protected template configuration (requires template_admin)
     tmpl_res = client.put("/api/documents/templates-config/exec_meet", json={
         "display_name": "Hacked Name"
     }, headers={"Authorization": f"Bearer {token}"})

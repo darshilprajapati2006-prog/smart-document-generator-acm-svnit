@@ -42,6 +42,7 @@ def init_db():
             role TEXT NOT NULL CHECK(role IN ('viewer', 'author', 'reviewer', 'approver', 'template_admin', 'admin')),
             status TEXT NOT NULL DEFAULT 'active',
             is_active INTEGER NOT NULL DEFAULT 1,
+            is_verified INTEGER NOT NULL DEFAULT 0,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
         """)
@@ -53,6 +54,45 @@ def init_db():
             conn.execute("ALTER TABLE users ADD COLUMN is_active INTEGER DEFAULT 1")
         except Exception:
             pass
+        try:
+            conn.execute("ALTER TABLE users ADD COLUMN is_verified INTEGER DEFAULT 0")
+        except Exception:
+            pass
+
+        # 1b. Cryptographic OTP Verification Challenges
+        conn.execute("""
+        CREATE TABLE IF NOT EXISTS auth_otps (
+            id TEXT PRIMARY KEY,
+            email TEXT NOT NULL,
+            user_id TEXT,
+            purpose TEXT NOT NULL CHECK(purpose IN ('signup_verification', 'login_2fa', 'password_reset')),
+            otp_hash TEXT NOT NULL,
+            attempts INTEGER NOT NULL DEFAULT 0,
+            max_attempts INTEGER NOT NULL DEFAULT 5,
+            expires_at TIMESTAMP NOT NULL,
+            resend_available_at TIMESTAMP NOT NULL,
+            is_used INTEGER NOT NULL DEFAULT 0,
+            challenge_id TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+        """)
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_otps_email_purpose ON auth_otps(email, purpose, is_used);")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_otps_challenge_id ON auth_otps(challenge_id);")
+
+        # 1c. Security Audit Logs
+        conn.execute("""
+        CREATE TABLE IF NOT EXISTS audit_logs (
+            id TEXT PRIMARY KEY,
+            actor_id TEXT,
+            actor_email TEXT,
+            target_user_id TEXT,
+            action TEXT NOT NULL,
+            details_json TEXT,
+            ip_address TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+        """)
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_audit_logs_action ON audit_logs(action);")
 
         # 2. Documents table
         conn.execute("""

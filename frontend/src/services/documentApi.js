@@ -276,11 +276,102 @@ export async function loginUser(email, password) {
     const err = await res.json().catch(() => ({}));
     throw new Error(err.detail || "Authentication failed.");
   }
+  return res.json();
+}
+
+export async function verifyLoginOtp({ challenge_id, otp }) {
+  const res = await fetch(`${API_BASE_URL}/api/auth/verify-login-otp`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ challenge_id, otp }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || "Verification failed.");
+  }
   const data = await res.json();
   if (data.access_token) {
     setAuthToken(data.access_token);
   }
   return data;
+}
+
+export async function resendLoginOtp({ challenge_id }) {
+  const res = await fetch(`${API_BASE_URL}/api/auth/resend-login-otp`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ challenge_id }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || "Failed to resend code.");
+  }
+  return res.json();
+}
+
+export async function registerUser({ full_name, email, password, confirm_password }) {
+  const res = await fetch(`${API_BASE_URL}/api/auth/register`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ full_name, email, password, confirm_password }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || "Registration failed.");
+  }
+  return res.json();
+}
+
+export async function verifyEmailOtp({ email, otp }) {
+  const res = await fetch(`${API_BASE_URL}/api/auth/verify-email-otp`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email, otp }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || "Verification failed.");
+  }
+  return res.json();
+}
+
+export async function resendEmailOtp({ email }) {
+  const res = await fetch(`${API_BASE_URL}/api/auth/resend-email-otp`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || "Failed to resend code.");
+  }
+  return res.json();
+}
+
+export async function forgotPassword({ email }) {
+  const res = await fetch(`${API_BASE_URL}/api/auth/forgot-password`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || "Failed to process password recovery.");
+  }
+  return res.json();
+}
+
+export async function resetPassword({ email, otp, new_password, confirm_password }) {
+  const res = await fetch(`${API_BASE_URL}/api/auth/reset-password`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email, otp, new_password, confirm_password }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || "Failed to reset password.");
+  }
+  return res.json();
 }
 
 export async function fetchCurrentUserProfile() {

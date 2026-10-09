@@ -344,5 +344,41 @@ test("Login credential validator rejects empty or malformed inputs", () => {
   assert.equal(validateLoginInput("admin@svnit.acm.org", "Admin@1234").valid, true);
 });
 
+test("Registration input validator enforces password match and security policy", () => {
+  function validateRegistration({ fullName, email, password, confirmPassword }) {
+    if (!fullName || !fullName.trim()) return { valid: false, error: "Name required" };
+    if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) return { valid: false, error: "Invalid email" };
+    if (password !== confirmPassword) return { valid: false, error: "Passwords do not match" };
+    if (password.length < 8) return { valid: false, error: "Password must be at least 8 characters" };
+    if (!/\d/.test(password) || !/[a-zA-Z]/.test(password)) return { valid: false, error: "Must contain letter and digit" };
+    return { valid: true };
+  }
+
+  // Mismatched passwords
+  assert.equal(validateRegistration({ fullName: "User", email: "u@svnit.acm.org", password: "Password1", confirmPassword: "Password2" }).valid, false);
+
+  // Short password
+  assert.equal(validateRegistration({ fullName: "User", email: "u@svnit.acm.org", password: "short1", confirmPassword: "short1" }).valid, false);
+
+  // No numbers
+  assert.equal(validateRegistration({ fullName: "User", email: "u@svnit.acm.org", password: "NoNumbersHere", confirmPassword: "NoNumbersHere" }).valid, false);
+
+  // Valid
+  assert.equal(validateRegistration({ fullName: "User", email: "u@svnit.acm.org", password: "StrongPassword@1", confirmPassword: "StrongPassword@1" }).valid, true);
+});
+
+test("OTP verification input strictly requires 6 numeric digits", () => {
+  function validateOtp(code) {
+    if (!code) return false;
+    const clean = code.trim();
+    return clean.length === 6 && /^\d{6}$/.test(clean);
+  }
+
+  assert.equal(validateOtp("12345"), false); // too short
+  assert.equal(validateOtp("1234567"), false); // too long
+  assert.equal(validateOtp("12a456"), false); // non-numeric
+  assert.equal(validateOtp("849201"), true); // valid 6 digits
+});
+
 
 
