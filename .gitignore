@@ -218,3 +218,12 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Frontend build & modules
+node_modules/
+dist/
+.vite/
+
+# Application generated documents
+backend/generated_docs/
+
