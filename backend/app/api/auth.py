@@ -280,11 +280,10 @@ def register_user(request: UserRegisterRequest, req: Request):
         # 3. Dispatch branded verification email
         email_sent = send_signup_otp_email(request.email, request.full_name, raw_otp)
         if not email_sent:
-            # SMTP failed; rollback or alert safely
             conn.rollback()
             raise HTTPException(
                 status_code=502,
-                detail="Unable to send email verification code at this time. Please check SMTP configuration or try again."
+                detail="Unable to send email verification code via email service. Please check RESEND_API_KEY and EMAIL_FROM configuration or try again."
             )
 
         # 4. Audit Log
@@ -452,7 +451,7 @@ def login_user(request: UserLoginRequest, req: Request):
             conn.rollback()
             raise HTTPException(
                 status_code=502,
-                detail="Unable to send login verification code. Please check SMTP configuration or try again."
+                detail="Unable to send login verification code via email service. Please check RESEND_API_KEY and EMAIL_FROM configuration or try again."
             )
 
         record_audit_log(

@@ -20,8 +20,9 @@ class EmailDistributionService:
 
     @classmethod
     def is_configured(cls) -> bool:
+        resend_key = os.getenv("RESEND_API_KEY")
         host = os.getenv("SMTP_HOST")
-        return bool(host and host.strip())
+        return bool((resend_key and resend_key.strip()) or (host and host.strip()))
 
     @classmethod
     def validate_recipients(cls, recipients: List[str]) -> List[str]:

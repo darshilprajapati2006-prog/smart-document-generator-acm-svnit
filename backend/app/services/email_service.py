@@ -1,36 +1,47 @@
 """
-Configurable Transactional & SMTP Email Service for SmartDocs SVNIT.
+Transactional Email Service for SmartDocs SVNIT via Resend HTTPS API.
 Handles delivery of verification OTPs for sign-up, two-factor login, and password resets.
-Adheres to strict security standards:
-- Configuration via environment variables.
-- Resilient error handling without crashing application state.
+
+Key Features:
+- Direct HTTPS dispatch to https://api.resend.com/emails (no SMTP port blocking issues).
+- Configuration via RESEND_API_KEY and EMAIL_FROM environment variables.
+- Resilient error handling without leaking API keys, passwords, or OTPs.
 - In-memory inspection interface for test runner verification.
-- Zero credential leakage to frontend or logs.
+- Safe development fallback with terminal banner when RESEND_API_KEY is not configured.
 """
 import os
-import smtplib
 import logging
-from email.mime.multipart import MIMEMultipart
-from email.mime.text import MIMEText
 from typing import Dict, Any, List, Optional
 from datetime import datetime, timezone
+import httpx
 
 logger = logging.getLogger(__name__)
+
+RESEND_API_URL = "https://api.resend.com/emails"
 
 # Test & Debug in-memory message log (stores delivery records for test assertions)
 LAST_SENT_EMAILS: List[Dict[str, Any]] = []
 
 def get_email_config() -> Dict[str, Any]:
-    """Reads SMTP configuration from server-side environment variables."""
+    """Reads Resend configuration from server-side environment variables."""
+    api_key = os.getenv("RESEND_API_KEY", "").strip()
+    from_raw = (
+        os.getenv("EMAIL_FROM", "").strip()
+        or os.getenv("RESEND_FROM_EMAIL", "").strip()
+        or os.getenv("SMTP_FROM_EMAIL", "").strip()
+        or "onboarding@resend.dev"
+    )
+
+    # Format 'from' field properly: e.g. 'SmartDocs SVNIT <onboarding@resend.dev>'
+    if "<" not in from_raw and "@" in from_raw:
+        from_name = os.getenv("EMAIL_FROM_NAME", "SmartDocs SVNIT · ACM Chapter").strip()
+        from_address = f"{from_name} <{from_raw}>"
+    else:
+        from_address = from_raw
+
     return {
-        "host": os.getenv("SMTP_HOST", "").strip(),
-        "port": int(os.getenv("SMTP_PORT", "587")),
-        "username": os.getenv("SMTP_USERNAME", "").strip(),
-        "password": os.getenv("SMTP_PASSWORD", "").strip(),
-        "from_email": os.getenv("SMTP_FROM_EMAIL", "noreply@svnit.acm.org").strip(),
-        "from_name": os.getenv("SMTP_FROM_NAME", "SmartDocs SVNIT · ACM Chapter").strip(),
-        "use_tls": os.getenv("SMTP_USE_TLS", "true").lower() in ["1", "true", "yes"],
-        "use_ssl": os.getenv("SMTP_USE_SSL", "false").lower() in ["1", "true", "yes"],
+        "api_key": api_key,
+        "from_address": from_address,
     }
 
 def format_otp_html(
@@ -167,9 +178,9 @@ def send_email(
     otp_code: Optional[str] = None
 ) -> bool:
     """
-    Sends an email using the configured SMTP server.
-    If no SMTP host is configured, safely records in memory for local dev/testing.
-    Returns True if sent or queued safely in dev mode; False on transmission failure.
+    Sends an email using the Resend HTTPS API (POST https://api.resend.com/emails).
+    If RESEND_API_KEY is not configured, safely records in memory and logs to console for local dev/testing.
+    Returns True if successfully dispatched; False on transmission failure.
     """
     cfg = get_email_config()
     record = {
@@ -181,44 +192,61 @@ def send_email(
         "live_delivery": False
     }
 
-    # If SMTP is configured, attempt real delivery
-    if cfg["host"]:
+    # If Resend API Key is configured, execute HTTPS request
+    if cfg["api_key"]:
+        payload = {
+            "from": cfg["from_address"],
+            "to": [to_email],
+            "subject": subject,
+            "html": html_content,
+            "text": text_content
+        }
+
         try:
-            msg = MIMEMultipart("alternative")
-            msg["Subject"] = subject
-            msg["From"] = f"{cfg['from_name']} <{cfg['from_email']}>"
-            msg["To"] = to_email
+            with httpx.Client(timeout=15.0) as client:
+                res = client.post(
+                    RESEND_API_URL,
+                    headers={
+                        "Authorization": f"Bearer {cfg['api_key']}",
+                        "Content-Type": "application/json"
+                    },
+                    json=payload
+                )
 
-            part1 = MIMEText(text_content, "plain")
-            part2 = MIMEText(html_content, "html")
-            msg.attach(part1)
-            msg.attach(part2)
-
-            if cfg["use_ssl"]:
-                server = smtplib.SMTP_SSL(cfg["host"], cfg["port"], timeout=10.0)
+            if res.status_code in (200, 201):
+                res_data = res.json()
+                record["live_delivery"] = True
+                record["provider_id"] = res_data.get("id")
+                LAST_SENT_EMAILS.append(record)
+                logger.info(
+                    "Successfully dispatched email via Resend to %s for %s (id=%s)",
+                    to_email, purpose, res_data.get("id")
+                )
+                return True
             else:
-                server = smtplib.SMTP(cfg["host"], cfg["port"], timeout=10.0)
-                if cfg["use_tls"]:
-                    server.starttls()
+                try:
+                    err_json = res.json()
+                    err_msg = err_json.get("message", res.text)
+                except Exception:
+                    err_msg = res.text
+                
+                logger.error(
+                    "Resend API error (%s) when sending to %s: %s",
+                    res.status_code, to_email, err_msg
+                )
+                record["delivery_error"] = f"Resend HTTP {res.status_code}: {err_msg}"
+                LAST_SENT_EMAILS.append(record)
+                return False
 
-            if cfg["username"] and cfg["password"]:
-                server.login(cfg["username"], cfg["password"])
-
-            server.sendmail(cfg["from_email"], [to_email], msg.as_string())
-            server.quit()
-            record["live_delivery"] = True
-            LAST_SENT_EMAILS.append(record)
-            logger.info("Successfully dispatched live email to %s for %s", to_email, purpose)
-            return True
         except Exception as exc:
-            logger.error("Failed to transmit email via SMTP (%s): %s", cfg["host"], str(exc))
+            logger.error("Resend connection error when sending to %s: %s", to_email, str(exc))
             record["delivery_error"] = str(exc)
             LAST_SENT_EMAILS.append(record)
-            # In production when SMTP is explicitly configured, failure to send returns False
             return False
+
     else:
         # Development / test mode: safe simulated delivery with terminal console banner
-        logger.info("[DEV EMAIL] SMTP_HOST not set. Captured message for %s (Purpose: %s)", to_email, purpose)
+        logger.info("[DEV EMAIL] RESEND_API_KEY not set. Captured message for %s (Purpose: %s)", to_email, purpose)
         record["live_delivery"] = False
         LAST_SENT_EMAILS.append(record)
         print("\n" + "=" * 58, flush=True)
@@ -227,7 +255,7 @@ def send_email(
         print(f"Subject: {subject}", flush=True)
         if otp_code:
             print(f"🔑 OTP CODE: {otp_code}", flush=True)
-        print("💡 Note: Add SMTP_HOST & SMTP_PASSWORD to backend/.env for real inbox delivery.", flush=True)
+        print("💡 Note: Add RESEND_API_KEY and EMAIL_FROM in environment for live Resend delivery.", flush=True)
         print("=" * 58 + "\n", flush=True)
         return True
 
