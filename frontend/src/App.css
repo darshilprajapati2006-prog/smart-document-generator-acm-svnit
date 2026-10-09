@@ -635,6 +635,72 @@
 }
 
 /* Dynamic Table & Form Extension Styles */
+.doc-type-pill {
+  display: inline-block;
+  padding: 3px 8px;
+  background: #ede9fe;
+  color: #6d28d9;
+  border-radius: 6px;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-left: 8px;
+  vertical-align: middle;
+}
+
+.demo-preview-chip {
+  display: block;
+  margin-top: 8px;
+  padding: 5px 9px;
+  background: #f1f5f9;
+  color: #475569;
+  border-radius: 6px;
+  font-size: 10px;
+  line-height: 1.4;
+  border: 1px dashed #cbd5e1;
+}
+
+.form-header-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.reset-btn {
+  padding: 6px 11px;
+  background: #f1f5f9;
+  color: #64748b;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.reset-btn:hover {
+  background: #e2e8f0;
+  color: #334155;
+}
+
+.demo-load-btn {
+  padding: 6px 11px;
+  background: #f5f3ff;
+  color: #7c3aed;
+  border: 1px solid #ddd6fe;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.demo-load-btn:hover {
+  background: #ede9fe;
+}
+
 .form-section-title {
   margin: 22px 0 12px;
   padding-bottom: 6px;
@@ -1027,4 +1093,186 @@
     grid-template-columns: 1fr;
     gap: 7px;
   }
+}
+
+/* Good-to-Have Features 1-14 Styling Extensions */
+.topbar-controls {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.control-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 5px 10px;
+  font-size: 12px;
+  font-weight: 500;
+  color: #334155;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+}
+
+.control-badge select {
+  border: none;
+  background: transparent;
+  font-size: 12px;
+  font-weight: 600;
+  color: #1e293b;
+  cursor: pointer;
+  outline: none;
+}
+
+.nav-item-btn {
+  background: none;
+  border: none;
+  width: 100%;
+  text-align: left;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.recommendation-card {
+  margin-top: 10px;
+  padding: 12px 16px;
+  background: #eef2ff;
+  border: 1px solid #c7d2fe;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.recommendation-info {
+  flex: 1;
+  min-width: 200px;
+}
+
+.recommendation-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: #3730a3;
+  margin-bottom: 2px;
+}
+
+.recommendation-meta {
+  font-size: 11px;
+  color: #4338ca;
+}
+
+.recommendation-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.apply-rec-btn {
+  background: #4f46e5;
+  color: white;
+  border: none;
+  padding: 6px 12px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.apply-rec-btn:hover {
+  background: #4338ca;
+}
+
+.dismiss-rec-btn {
+  background: transparent;
+  color: #64748b;
+  border: 1px solid #cbd5e1;
+  padding: 6px 10px;
+  border-radius: 6px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.dynamic-section-box {
+  background: #f8fafc;
+  border: 1px dashed #cbd5e1;
+  border-radius: 8px;
+  padding: 14px;
+  margin: 12px 0;
+}
+
+.section-toggle-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #1e293b;
+  cursor: pointer;
+  user-select: none;
+}
+
+.section-toggle-label input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  accent-color: #4f46e5;
+  cursor: pointer;
+}
+
+.clause-insert-btn {
+  background: #f1f5f9;
+  border: 1px solid #cbd5e1;
+  color: #1e293b;
+  padding: 6px 12px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  transition: all 0.15s ease;
+}
+
+.clause-insert-btn:hover {
+  background: #e2e8f0;
+  border-color: #94a3b8;
+}
+
+.action-card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.action-card {
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 12px;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.action-card:hover {
+  border-color: #4f46e5;
+  box-shadow: 0 2px 6px rgba(79, 70, 229, 0.08);
+}
+
+.action-card h4 {
+  margin: 0 0 4px;
+  font-size: 13px;
+  color: #1e293b;
+}
+
+.action-card p {
+  margin: 0;
+  font-size: 11px;
+  color: #64748b;
 }

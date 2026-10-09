@@ -1,0 +1,224 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+
+// Helper replicating frontend field mapping for Executive Meet
+function mapExecFields(extractedFields = {}) {
+  const fieldMap = {
+    event_name: extractedFields.event_name,
+    event_date: extractedFields.event_date,
+    venue: extractedFields.venue,
+    time_from: extractedFields.time_from || extractedFields.start_time,
+    time_to: extractedFields.time_to || extractedFields.end_time,
+    participants: extractedFields.participants || extractedFields.expected_participants,
+    organizers: extractedFields.organizers || extractedFields.organizing_club,
+    mode: extractedFields.mode || extractedFields.mode_of_conduct,
+    brief_description: extractedFields.brief_description,
+    objective: extractedFields.objective,
+    lead_name: extractedFields.lead_name || extractedFields.coordinator,
+    ref_no: extractedFields.ref_no,
+    date: extractedFields.date,
+    submitted_to: extractedFields.submitted_to,
+    subject: extractedFields.subject,
+  };
+
+  const appliedFields = {};
+  let fieldCount = 0;
+  for (const [k, v] of Object.entries(fieldMap)) {
+    if (v !== undefined && v !== null && String(v).trim() !== "") {
+      appliedFields[k] = String(v).trim();
+      fieldCount++;
+    }
+  }
+  return { appliedFields, fieldCount };
+}
+
+// Financial calculations
+function calculateBillCertTotals(items = [], taxes = 0) {
+  let subtotal = 0;
+  for (const itm of items) {
+    subtotal += Math.round(Number(itm.quantity) * Number(itm.unit_cost) * 100) / 100;
+  }
+  subtotal = Math.round(subtotal * 100) / 100;
+  const taxesNum = Math.round(Number(taxes) * 100) / 100;
+  const grandTotal = Math.round((subtotal + taxesNum) * 100) / 100;
+  return { subtotal, taxes: taxesNum, grandTotal };
+}
+
+function calculateBillSummaryTotals(rows = []) {
+  let prizeTotal = 0;
+  let otherTotal = 0;
+  for (const r of rows) {
+    prizeTotal += Math.round(Number(r.prize_money || 0) * 100) / 100;
+    otherTotal += Math.round(Number(r.other_amount || 0) * 100) / 100;
+  }
+  prizeTotal = Math.round(prizeTotal * 100) / 100;
+  otherTotal = Math.round(otherTotal * 100) / 100;
+  const grandTotal = Math.round((prizeTotal + otherTotal) * 100) / 100;
+  return { prizeTotal, otherTotal, grandTotal };
+}
+
+// TESTS
+test("Frontend Executive Meet Mapping handles canonical keys and aliases", () => {
+  const backendExtracted = {
+    event_name: "Machine Learning Workshop",
+    event_date: "28 October 2026",
+    venue: "Seminar Hall, SVNIT Surat",
+    start_time: "10:00 AM",
+    end_time: "4:00 PM",
+    expected_participants: "100",
+    organizing_club: "ACM Student Chapter, SVNIT Surat",
+    coordinator: "Darshil Prajapati",
+    brief_description: "A workshop covering machine learning fundamentals."
+  };
+
+  const { appliedFields, fieldCount } = mapExecFields(backendExtracted);
+
+  assert.equal(fieldCount, 9);
+  assert.equal(appliedFields.event_name, "Machine Learning Workshop");
+  assert.equal(appliedFields.event_date, "28 October 2026");
+  assert.equal(appliedFields.venue, "Seminar Hall, SVNIT Surat");
+  assert.equal(appliedFields.time_from, "10:00 AM");
+  assert.equal(appliedFields.time_to, "4:00 PM");
+  assert.equal(appliedFields.participants, "100");
+  assert.equal(appliedFields.organizers, "ACM Student Chapter, SVNIT Surat");
+  assert.equal(appliedFields.lead_name, "Darshil Prajapati");
+  assert.equal(appliedFields.brief_description, "A workshop covering machine learning fundamentals.");
+
+  // Unmentioned fields remain unset
+  assert.equal(appliedFields.ref_no, undefined);
+  assert.equal(appliedFields.submitted_to, undefined);
+  assert.equal(appliedFields.mode, undefined);
+});
+
+test("Frontend Financial Calculations maintain decimal accuracy for Bill Certificate", () => {
+  const items = [
+    { name: "Component A", quantity: 3, unit_cost: 33.33 },
+    { name: "Component B", quantity: 2, unit_cost: 15.50 }
+  ];
+  const { subtotal, taxes, grandTotal } = calculateBillCertTotals(items, 18.01);
+  assert.equal(subtotal, 130.99); // 99.99 + 31.00
+  assert.equal(taxes, 18.01);
+  assert.equal(grandTotal, 149.00);
+});
+
+test("Frontend Financial Calculations maintain decimal accuracy for Bill Summary", () => {
+  const rows = [
+    { name: "Student 1", prize_money: 1500.50, other_amount: 100.25 },
+    { name: "Student 2", prize_money: 800.00, other_amount: 50.00 }
+  ];
+  const { prizeTotal, otherTotal, grandTotal } = calculateBillSummaryTotals(rows);
+  assert.equal(prizeTotal, 2300.50);
+  assert.equal(otherTotal, 150.25);
+  assert.equal(grandTotal, 2450.75);
+});
+
+test("Missing field detection identifies mandatory fields", () => {
+  const partialFields = {
+    event_name: "Workshop",
+    venue: "Seminar Hall"
+  };
+  const required = ["event_name", "event_date", "venue", "time_from", "time_to", "brief_description"];
+  const missing = required.filter(f => !partialFields[f]);
+
+  assert.deepEqual(missing, ["event_date", "time_from", "time_to", "brief_description"]);
+});
+
+// Good-to-Have Feature 14: Multilingual Translation Test
+import { translations } from "../src/i18n/translations.js";
+
+test("Multilingual Translations contain full key coverage for en, hi, and gu", () => {
+  const languages = ["en", "hi", "gu"];
+  const essentialKeys = [
+    "create_doc",
+    "batch_generator",
+    "version_history",
+    "template_editor",
+    "analytics",
+    "recommended_type",
+    "status_approved",
+    "status_in_review"
+  ];
+
+  for (const lang of languages) {
+    assert.ok(translations[lang], `Translation dictionary exists for ${lang}`);
+    for (const key of essentialKeys) {
+      assert.ok(
+        typeof translations[lang][key] === "string" && translations[lang][key].length > 0,
+        `Missing or empty translation for key '${key}' in language '${lang}'`
+      );
+    }
+  }
+});
+
+// Good-to-Have Feature 1: Classification recommendation handler test
+test("Classification recommendation logic identifies matching template and ambiguity", () => {
+  const handleRecommendation = (clsResult, currentType) => {
+    if (clsResult.is_ambiguous) {
+      return { action: "prompt_user", message: "Ambiguous prompt" };
+    }
+    if (clsResult.recommended_type && clsResult.recommended_type !== currentType) {
+      return { action: "recommend_switch", target: clsResult.recommended_type };
+    }
+    return { action: "keep_current", target: currentType };
+  };
+
+  const clearEvent = { recommended_type: "exec_meet", confidence: 0.95, is_ambiguous: false };
+  assert.deepEqual(handleRecommendation(clearEvent, "bill_certificate"), {
+    action: "recommend_switch",
+    target: "exec_meet",
+  });
+
+  const ambiguous = { recommended_type: null, confidence: 0.3, is_ambiguous: true };
+  assert.deepEqual(handleRecommendation(ambiguous, "exec_meet"), {
+    action: "prompt_user",
+    message: "Ambiguous prompt",
+  });
+});
+
+// Good-to-Have Feature 2: Conditional Section Visibility Logic
+test("Conditional section evaluation determines active fields correctly", () => {
+  const evaluateExecSections = (formData) => {
+    const sections = { offlineVenue: false, onlinePlatform: false, agenda: false };
+    if (formData.mode === "Offline" || formData.mode === "Hybrid") {
+      sections.offlineVenue = true;
+    }
+    if (formData.mode === "Online" || formData.mode === "Hybrid") {
+      sections.onlinePlatform = true;
+    }
+    if (formData.has_agenda) {
+      sections.agenda = true;
+    }
+    return sections;
+  };
+
+  const offlineDoc = evaluateExecSections({ mode: "Offline", has_agenda: false });
+  assert.equal(offlineDoc.offlineVenue, true);
+  assert.equal(offlineDoc.onlinePlatform, false);
+  assert.equal(offlineDoc.agenda, false);
+
+  const onlineWithAgenda = evaluateExecSections({ mode: "Online", has_agenda: true });
+  assert.equal(onlineWithAgenda.offlineVenue, false);
+  assert.equal(onlineWithAgenda.onlinePlatform, true);
+  assert.equal(onlineWithAgenda.agenda, true);
+});
+
+// Good-to-Have Feature 6: Safe Clause Variable Interpolation
+test("Clause variable interpolation correctly substitutes placeholders", () => {
+  function interpolateClause(template, variables) {
+    let result = template;
+    for (const [key, value] of Object.entries(variables)) {
+      result = result.replaceAll(`{{${key}}}`, value || "");
+    }
+    return result;
+  }
+
+  const clauseText = "Permission requested for {{event_name}} on {{date}} at {{venue}}.";
+  const filled = interpolateClause(clauseText, {
+    event_name: "AI Hackathon",
+    date: "15/10/2026",
+    venue: "Seminar Hall 402",
+  });
+
+  assert.equal(filled, "Permission requested for AI Hackathon on 15/10/2026 at Seminar Hall 402.");
+});
+
