@@ -7,12 +7,13 @@ import hmac
 import secrets
 import json
 import base64
+import os
 import time
 from typing import Optional, Dict, Any
 from fastapi import HTTPException, Security, Depends
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 
-SECRET_KEY = "acm-svnit-smart-document-generator-secure-secret-key-2026"
+SECRET_KEY = os.environ.get("JWT_SECRET_KEY") or os.environ.get("SECRET_KEY") or "acm-svnit-smart-document-generator-secure-secret-key-2026"
 ALGORITHM = "PBKDF2-HMAC-SHA256"
 SALT_BYTES = 16
 HASH_ITERATIONS = 100_000
@@ -113,20 +114,57 @@ def sign_data_payload(data: Dict[str, Any], signer_id: str) -> str:
     return hmac.new(SECRET_KEY.encode('utf-8'), to_sign, hashlib.sha256).hexdigest()
 
 def get_current_user(credentials: Optional[HTTPAuthorizationCredentials] = Security(security_bearer)) -> Optional[Dict[str, Any]]:
-    """Dependency that extracts user if authenticated, or None if anonymous."""
+    """Dependency that extracts user if authenticated and active, or None if anonymous."""
     if not credentials:
         return None
     token = credentials.credentials
     user = decode_access_token(token)
+    if not user:
+        return None
+    try:
+        from app.db.database import get_db
+        with get_db() as conn:
+            user_row = conn.execute(
+                "SELECT id, email, full_name, role, status, is_active FROM users WHERE id = ?",
+                (user.get("sub"),)
+            ).fetchone()
+            if not user_row or user_row["is_active"] == 0 or user_row["status"] == "inactive":
+                return None
+            user["role"] = user_row["role"]
+            user["full_name"] = user_row["full_name"]
+            user["status"] = user_row["status"]
+            user["is_active"] = user_row["is_active"]
+    except Exception:
+        pass
     return user
 
 def require_authenticated_user(credentials: Optional[HTTPAuthorizationCredentials] = Security(security_bearer)) -> Dict[str, Any]:
-    """Dependency enforcing authentication."""
+    """Dependency enforcing authentication, active account status, and role integrity."""
     if not credentials:
         raise HTTPException(status_code=401, detail="Authentication credentials required.")
     user = decode_access_token(credentials.credentials)
     if not user:
         raise HTTPException(status_code=401, detail="Invalid or expired authentication token.")
+    
+    from app.db.database import get_db
+    with get_db() as conn:
+        user_row = conn.execute(
+            "SELECT id, email, full_name, role, status, is_active FROM users WHERE id = ?",
+            (user.get("sub"),)
+        ).fetchone()
+        if not user_row:
+            raise HTTPException(status_code=401, detail="User account no longer exists.")
+        if user_row["is_active"] == 0 or user_row["status"] == "inactive":
+            raise HTTPException(
+                status_code=403,
+                detail="Account is deactivated. Please contact the System Administrator."
+            )
+        # Keep authenticated context strictly synchronized with active database record
+        user["role"] = user_row["role"]
+        user["full_name"] = user_row["full_name"]
+        user["status"] = user_row["status"]
+        user["is_active"] = user_row["is_active"]
+        
     return user
 
 def require_role(allowed_roles: list[str]):

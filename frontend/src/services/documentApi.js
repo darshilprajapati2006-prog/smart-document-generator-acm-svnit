@@ -286,7 +286,86 @@ export async function loginUser(email, password) {
 export async function fetchCurrentUserProfile() {
   if (!authToken) return null;
   const res = await fetch(`${API_BASE_URL}/api/auth/me`, { headers: getHeaders() });
-  if (!res.ok) return null;
+  if (!res.ok) {
+    if (res.status === 401 || res.status === 403) {
+      setAuthToken("");
+      localStorage.removeItem("acm_doc_user");
+    }
+    return null;
+  }
+  return res.json();
+}
+
+export async function logoutUser() {
+  try {
+    await fetch(`${API_BASE_URL}/api/auth/logout`, {
+      method: "POST",
+      headers: getHeaders(),
+    });
+  } catch {
+    // ignore network errors on logout
+  }
+  setAuthToken("");
+  localStorage.removeItem("acm_doc_user");
+}
+
+export async function fetchUsers() {
+  const res = await fetch(`${API_BASE_URL}/api/auth/users`, { headers: getHeaders() });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || "Failed to load users list.");
+  }
+  return res.json();
+}
+
+export async function createUser(userData) {
+  const res = await fetch(`${API_BASE_URL}/api/auth/users`, {
+    method: "POST",
+    headers: getHeaders(),
+    body: JSON.stringify(userData),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || "Failed to create user account.");
+  }
+  return res.json();
+}
+
+export async function updateUserRole(userId, newRole) {
+  const res = await fetch(`${API_BASE_URL}/api/auth/users/${userId}/role`, {
+    method: "PUT",
+    headers: getHeaders(),
+    body: JSON.stringify({ role: newRole }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || "Failed to update user role.");
+  }
+  return res.json();
+}
+
+export async function updateUserStatus(userId, status) {
+  const res = await fetch(`${API_BASE_URL}/api/auth/users/${userId}/status`, {
+    method: "PUT",
+    headers: getHeaders(),
+    body: JSON.stringify({ status }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || "Failed to update user status.");
+  }
+  return res.json();
+}
+
+export async function deleteUser(userId) {
+  const res = await fetch(`${API_BASE_URL}/api/auth/users/${userId}`, {
+    method: "DELETE",
+    headers: getHeaders(),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || "Failed to delete user account.");
+  }
   return res.json();
 }
 

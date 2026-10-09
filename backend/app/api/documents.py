@@ -49,6 +49,8 @@ def get_template_details(template_id: str):
 @router.post("/executive-meet/generate")
 def generate_executive_meet(data: ExecutiveMeetRequest, current_user: Optional[Dict[str, Any]] = Depends(get_current_user)):
     """Generates DOCX and PDF for Executive Meet permission request and persists version record."""
+    if current_user and current_user.get("role") == "viewer":
+        raise HTTPException(status_code=403, detail="Viewer role has read-only access and cannot generate documents.")
     t0 = time.time()
     user_id = current_user.get("sub") if current_user else "guest-user"
     user_role = current_user.get("role") if current_user else "viewer"
@@ -119,6 +121,8 @@ def generate_executive_meet(data: ExecutiveMeetRequest, current_user: Optional[D
 @router.post("/bill-certificate/generate")
 def generate_bill_certificate(data: BillCertificateRequest, current_user: Optional[Dict[str, Any]] = Depends(get_current_user)):
     """Generates DOCX and PDF for Bill Certificate (Recurring Expenditure) and persists version record."""
+    if current_user and current_user.get("role") == "viewer":
+        raise HTTPException(status_code=403, detail="Viewer role has read-only access and cannot generate documents.")
     t0 = time.time()
     user_id = current_user.get("sub") if current_user else "guest-user"
     user_role = current_user.get("role") if current_user else "viewer"
@@ -196,6 +200,8 @@ def generate_bill_certificate(data: BillCertificateRequest, current_user: Option
 @router.post("/bill-summary/generate")
 def generate_bill_summary(data: BillSummaryRequest, current_user: Optional[Dict[str, Any]] = Depends(get_current_user)):
     """Generates DOCX and PDF for Bill Summary and persists version record."""
+    if current_user and current_user.get("role") == "viewer":
+        raise HTTPException(status_code=403, detail="Viewer role has read-only access and cannot generate documents.")
     t0 = time.time()
     user_id = current_user.get("sub") if current_user else "guest-user"
     user_role = current_user.get("role") if current_user else "viewer"
@@ -729,6 +735,8 @@ def batch_generate(req: BatchGenerateRequest, current_user: Optional[Dict[str, A
     Feature 3: Batch Document Generation.
     Executes multiple document jobs in isolation with per-job status and zip bundle creation.
     """
+    if current_user and current_user.get("role") == "viewer":
+        raise HTTPException(status_code=403, detail="Viewer role has read-only access and cannot generate documents.")
     user_id = current_user.get("sub") if current_user else "batch-user"
     raw_jobs = [{"job_id": j.job_id, "document_type": j.document_type, "payload": j.payload} for j in req.jobs]
     res = BatchService.process_batch(raw_jobs, user_id=user_id)

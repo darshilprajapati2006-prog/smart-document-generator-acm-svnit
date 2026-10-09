@@ -19,12 +19,13 @@ class Settings:
         "http://127.0.0.1:5173",
         "http://localhost:3000",
         "http://127.0.0.1:3000",
+        "https://smart-document-generator-acm-svnit.vercel.app",
     ]
     
     # Custom CORS via env if set
-    env_origins = os.getenv("ALLOWED_ORIGINS")
+    env_origins = os.getenv("ALLOWED_ORIGINS") or os.getenv("FRONTEND_URL")
     if env_origins:
-        CORS_ORIGINS.extend([origin.strip() for origin in env_origins.split(",")])
+        CORS_ORIGINS.extend([origin.strip() for origin in env_origins.split(",") if origin.strip()])
 
     def __init__(self):
         self.STORAGE_DIR.mkdir(parents=True, exist_ok=True)

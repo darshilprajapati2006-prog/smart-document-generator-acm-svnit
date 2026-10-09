@@ -40,9 +40,19 @@ def init_db():
             hashed_password TEXT NOT NULL,
             full_name TEXT NOT NULL,
             role TEXT NOT NULL CHECK(role IN ('viewer', 'author', 'reviewer', 'approver', 'template_admin', 'admin')),
+            status TEXT NOT NULL DEFAULT 'active',
+            is_active INTEGER NOT NULL DEFAULT 1,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
         """)
+        try:
+            conn.execute("ALTER TABLE users ADD COLUMN status TEXT DEFAULT 'active'")
+        except Exception:
+            pass
+        try:
+            conn.execute("ALTER TABLE users ADD COLUMN is_active INTEGER DEFAULT 1")
+        except Exception:
+            pass
 
         # 2. Documents table
         conn.execute("""

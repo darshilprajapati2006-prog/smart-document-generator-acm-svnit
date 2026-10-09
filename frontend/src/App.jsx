@@ -6,6 +6,8 @@ import VersionWorkflowPanel from "./components/VersionWorkflowPanel";
 import TemplateEditorPanel from "./components/TemplateEditorPanel";
 import AnalyticsDashboard from "./components/AnalyticsDashboard";
 import ClausesModal from "./components/ClausesModal";
+import LoginPage from "./components/LoginPage";
+import UserManagementModal from "./components/UserManagementModal";
 import {
   checkBackendHealth,
   generateExecutiveMeet,
@@ -14,6 +16,9 @@ import {
   extractFromNLP,
   classifyPrompt,
   loginUser,
+  logoutUser,
+  fetchCurrentUserProfile,
+  getAuthToken,
   exportToGoogleDrive,
   distributeByEmail,
   signDocument,
@@ -297,7 +302,24 @@ export default function App() {
   // Good-to-Have Features State
   const [lang, setLang] = useState("en"); // "en" | "hi" | "gu"
   const [activeTab, setActiveTab] = useState("create"); // "create" | "batch" | "history" | "templates" | "analytics"
-  const [currentRole, setCurrentRole] = useState("author");
+  const [currentUser, setCurrentUser] = useState(() => {
+    try {
+      const saved = localStorage.getItem("acm_doc_user");
+      return saved ? JSON.parse(saved) : null;
+    } catch {
+      return null;
+    }
+  });
+  const [currentRole, setCurrentRole] = useState(() => {
+    try {
+      const saved = localStorage.getItem("acm_doc_user");
+      return saved ? JSON.parse(saved).role : "author";
+    } catch {
+      return "author";
+    }
+  });
+  const [authChecking, setAuthChecking] = useState(true);
+  const [showUserMgmt, setShowUserMgmt] = useState(false);
   const [recommendation, setRecommendation] = useState(null);
   const [showClausesModal, setShowClausesModal] = useState(false);
   const [selectedDocIdForHistory, setSelectedDocIdForHistory] = useState("");
@@ -308,50 +330,75 @@ export default function App() {
 
   const t = (key) => translations[lang]?.[key] || translations["en"]?.[key] || key;
 
-  // Initialize role authentication
-  const handleRoleChange = async (newRole) => {
-    setCurrentRole(newRole);
-    const roleEmailMap = {
-      admin: "admin@svnit.ac.in",
-      author: "author@svnit.ac.in",
-      reviewer: "reviewer@svnit.ac.in",
-      approver: "approver@svnit.ac.in",
-      tmpladmin: "tmpladmin@svnit.ac.in",
-      viewer: "viewer@svnit.ac.in",
-    };
-    const rolePassMap = {
-      admin: "admin123",
-      author: "author123",
-      reviewer: "reviewer123",
-      approver: "approver123",
-      tmpladmin: "tmpladmin123",
-      viewer: "viewer123",
-    };
-    try {
-      if (roleEmailMap[newRole]) {
-        await loginUser(roleEmailMap[newRole], rolePassMap[newRole]);
-      }
-    } catch {
-      // Offline fallback
-    }
+  const roleDisplayNames = {
+    author: "Author",
+    reviewer: "Reviewer",
+    approver: "Approver",
+    template_admin: "Template Admin",
+    tmpladmin: "Template Admin",
+    admin: "System Admin",
+    viewer: "Viewer",
   };
 
-  // Backend Health Ping & Initial Auth
+  const roleColors = {
+    author: { bg: "#e0f2fe", border: "#bae6fd", pill: "#0284c7" },
+    reviewer: { bg: "#fef3c7", border: "#fde68a", pill: "#d97706" },
+    approver: { bg: "#dcfce7", border: "#bbf7d0", pill: "#16a34a" },
+    template_admin: { bg: "#f3e8ff", border: "#e9d5ff", pill: "#7c3aed" },
+    tmpladmin: { bg: "#f3e8ff", border: "#e9d5ff", pill: "#7c3aed" },
+    admin: { bg: "#fee2e2", border: "#fecaca", pill: "#dc2626" },
+    viewer: { bg: "#f1f5f9", border: "#cbd5e1", pill: "#475569" },
+  };
+
+  // Validate session and check backend health on mount
   useEffect(() => {
-    async function init() {
+    async function initAuthAndHealth() {
       const isHealthy = await checkBackendHealth();
       setApiOnline(isHealthy);
-      if (isHealthy) {
-        handleRoleChange("author");
+
+      const token = getAuthToken();
+      if (token) {
+        try {
+          const profile = await fetchCurrentUserProfile();
+          if (profile && profile.authenticated && profile.user) {
+            setCurrentUser(profile.user);
+            setCurrentRole(profile.user.role);
+            localStorage.setItem("acm_doc_user", JSON.stringify(profile.user));
+          } else {
+            setCurrentUser(null);
+            localStorage.removeItem("acm_doc_user");
+          }
+        } catch {
+          // In offline mode, retain cached session
+        }
+      } else {
+        setCurrentUser(null);
+        localStorage.removeItem("acm_doc_user");
       }
+      setAuthChecking(false);
     }
-    init();
+
+    initAuthAndHealth();
+
     const interval = setInterval(async () => {
       const isHealthy = await checkBackendHealth();
       setApiOnline(isHealthy);
-    }, 10000);
+    }, 15000);
     return () => clearInterval(interval);
   }, []);
+
+  function handleLoginSuccess(user) {
+    setCurrentUser(user);
+    setCurrentRole(user.role);
+    localStorage.setItem("acm_doc_user", JSON.stringify(user));
+  }
+
+  async function handleLogout() {
+    await logoutUser();
+    setCurrentUser(null);
+    setCurrentRole("viewer");
+    localStorage.removeItem("acm_doc_user");
+  }
 
   // Document Type Switching
   function handleTypeChange(type) {
@@ -838,6 +885,10 @@ export default function App() {
 
   // GENERATE DOCUMENT HANDLER
   async function handleGenerateDocument() {
+    if (currentRole === "viewer") {
+      setError("Viewer role has read-only access. Only Author or Admin can generate official documents.");
+      return;
+    }
     setIsGenerating(true);
     setError("");
     setGeneratedResult(null);
@@ -1006,6 +1057,22 @@ export default function App() {
 
   const selectedDocConfig = documentCards.find((d) => d.id === selectedType) || documentCards[0];
 
+  if (authChecking) {
+    return (
+      <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: "#0f172a", color: "#ffffff", fontFamily: "'Inter', sans-serif" }}>
+        <div style={{ textAlign: "center" }}>
+          <div style={{ fontSize: "2.4rem", marginBottom: "12px" }}>⚡</div>
+          <div style={{ fontSize: "1.2rem", fontWeight: 700 }}>SmartDocs ACM SVNIT</div>
+          <div style={{ fontSize: "0.85rem", color: "#94a3b8", marginTop: "6px" }}>Authenticating secure session...</div>
+        </div>
+      </div>
+    );
+  }
+
+  if (!currentUser) {
+    return <LoginPage onLoginSuccess={handleLoginSuccess} />;
+  }
+
   return (
     <div className="app-shell">
       {/* SIDEBAR NAVIGATION */}
@@ -1060,6 +1127,17 @@ export default function App() {
           <span>📊</span> {t("analytics")}
         </button>
 
+        {currentRole === "admin" && (
+          <button
+            type="button"
+            className="nav-item nav-item-btn"
+            style={{ color: "#dc2626", fontWeight: 600 }}
+            onClick={() => setShowUserMgmt(true)}
+          >
+            <span>👥</span> User Management
+          </button>
+        )}
+
         <div className="sidebar-note">
           <span
             className="status-dot"
@@ -1086,28 +1164,64 @@ export default function App() {
 
       {/* MAIN VIEWPORT */}
       <main className="main-content" id="home">
-        {/* TOPBAR WITH RBAC & I18N SWITCHERS */}
+        {/* TOPBAR WITH AUTHENTICATED USER & CONTROLS */}
         <header className="topbar">
           <div className="breadcrumb">
             Workspace <span>/</span> {activeTab.toUpperCase()} <span>/</span> {selectedDocConfig.title}
           </div>
 
           <div className="topbar-controls">
-            {/* Role Switcher for RBAC Testing */}
-            <div className="control-badge" title="Switch User Role to test RBAC permissions">
-              <span>👤 Role:</span>
-              <select
-                value={currentRole}
-                onChange={(e) => handleRoleChange(e.target.value)}
+            {/* Authenticated User & Read-Only Role Indicator */}
+            <div
+              className="control-badge"
+              style={{
+                background: roleColors[currentRole]?.bg || "#f1f5f9",
+                borderColor: roleColors[currentRole]?.border || "#cbd5e1",
+                display: "flex",
+                alignItems: "center",
+                gap: "8px",
+                padding: "5px 12px",
+              }}
+              title={`Signed in as ${currentUser.full_name || currentUser.email}`}
+            >
+              <span style={{ fontSize: "0.85rem" }}>👤</span>
+              <span style={{ fontWeight: 600, fontSize: "0.82rem", color: "#0f172a" }}>
+                {currentUser.full_name || currentUser.email}
+              </span>
+              <span
+                style={{
+                  fontSize: "0.7rem",
+                  fontWeight: 700,
+                  padding: "2px 8px",
+                  borderRadius: "10px",
+                  background: roleColors[currentRole]?.pill || "#0284c7",
+                  color: "#ffffff",
+                  textTransform: "uppercase",
+                }}
               >
-                <option value="author">Author</option>
-                <option value="reviewer">Reviewer</option>
-                <option value="approver">Approver</option>
-                <option value="tmpladmin">Template Admin</option>
-                <option value="admin">System Admin</option>
-                <option value="viewer">Viewer</option>
-              </select>
+                {roleDisplayNames[currentRole] || currentRole}
+              </span>
             </div>
+
+            {/* Admin User Management Modal Trigger */}
+            {currentRole === "admin" && (
+              <button
+                type="button"
+                onClick={() => setShowUserMgmt(true)}
+                style={{
+                  padding: "6px 12px",
+                  borderRadius: "8px",
+                  border: "1px solid #fecaca",
+                  background: "#fff1f2",
+                  color: "#e11d48",
+                  fontSize: "0.8rem",
+                  fontWeight: 600,
+                  cursor: "pointer",
+                }}
+              >
+                👥 Users
+              </button>
+            )}
 
             {/* Language Switcher */}
             <div className="control-badge" title="Switch Interface Language (English, Hindi, Gujarati)">
@@ -1127,8 +1241,54 @@ export default function App() {
               />
               {apiOnline ? "FastAPI Connected" : "Connecting..."}
             </div>
+
+            {/* Logout Button */}
+            <button
+              type="button"
+              onClick={handleLogout}
+              style={{
+                padding: "6px 12px",
+                borderRadius: "8px",
+                border: "1px solid #cbd5e1",
+                background: "#ffffff",
+                color: "#475569",
+                fontSize: "0.8rem",
+                fontWeight: 600,
+                cursor: "pointer",
+                display: "flex",
+                alignItems: "center",
+                gap: "4px",
+              }}
+              title="Sign out of current account"
+            >
+              🚪 Logout
+            </button>
           </div>
         </header>
+
+        {/* Read-Only Viewer Notice */}
+        {currentRole === "viewer" && (
+          <div
+            role="status"
+            style={{
+              margin: "16px 28px 0",
+              padding: "12px 18px",
+              background: "#f8fafc",
+              border: "1px solid #cbd5e1",
+              borderRadius: "10px",
+              display: "flex",
+              alignItems: "center",
+              gap: "10px",
+              color: "#334155",
+              fontSize: "0.85rem",
+            }}
+          >
+            <span style={{ fontSize: "1.2rem" }}>👁️</span>
+            <div>
+              <strong>Read-Only Viewer Account:</strong> You are signed in as a Viewer. You can explore standard templates, history logs, and clauses, but cannot generate or submit documents. Contact a System Admin to request author privileges.
+            </div>
+          </div>
+        )}
 
         {/* TAB 1: DOCUMENT STUDIO (MAIN GENERATOR) */}
         {activeTab === "create" && (
@@ -2105,7 +2265,8 @@ export default function App() {
                       type="button"
                       className="primary-button"
                       onClick={handleGenerateDocument}
-                      disabled={isGenerating}
+                      disabled={isGenerating || currentRole === "viewer"}
+                      title={currentRole === "viewer" ? "Viewers cannot generate documents. Requires Author or Admin role." : "Generate official documents"}
                     >
                       {isGenerating ? (
                         <>
@@ -2312,6 +2473,15 @@ export default function App() {
             : billSummaryData
         }
       />
+
+      {/* USER MANAGEMENT MODAL (ADMIN ONLY) */}
+      {currentRole === "admin" && (
+        <UserManagementModal
+          isOpen={showUserMgmt}
+          onClose={() => setShowUserMgmt(false)}
+          currentUserId={currentUser?.id}
+        />
+      )}
 
       {/* EMAIL DISTRIBUTION MODAL */}
       {emailModalOpen && (

@@ -25,8 +25,13 @@ def seed_database():
             existing = conn.execute("SELECT id FROM users WHERE email = ?", (email,)).fetchone()
             if not existing:
                 conn.execute(
-                    "INSERT INTO users (id, email, hashed_password, full_name, role) VALUES (?, ?, ?, ?, ?)",
+                    "INSERT INTO users (id, email, hashed_password, full_name, role, status, is_active) VALUES (?, ?, ?, ?, ?, 'active', 1)",
                     (u_id, email, hash_password(pwd), name, role)
+                )
+            else:
+                conn.execute(
+                    "UPDATE users SET status = 'active', is_active = 1 WHERE email = ?",
+                    (email,)
                 )
 
         # 2. Seed pre-approved Reusable Clauses

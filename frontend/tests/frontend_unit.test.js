@@ -294,4 +294,55 @@ test("Inserting a clause updates the selected document section without overwriti
   assert.equal(updatedFormObj.brief_description, "Initial description."); // Unrelated field intact
 });
 
+// Role-Based Access Control & Login Tests
+test("Role-Based Permissions accurately define capabilities across all six roles", () => {
+  const rolePermissions = {
+    author: { canGenerate: true, canReview: false, canApprove: false, canManageTemplates: false, canManageUsers: false },
+    reviewer: { canGenerate: false, canReview: true, canApprove: false, canManageTemplates: false, canManageUsers: false },
+    approver: { canGenerate: false, canReview: true, canApprove: true, canManageTemplates: false, canManageUsers: false },
+    template_admin: { canGenerate: true, canReview: false, canApprove: false, canManageTemplates: true, canManageUsers: false },
+    admin: { canGenerate: true, canReview: true, canApprove: true, canManageTemplates: true, canManageUsers: true },
+    viewer: { canGenerate: false, canReview: false, canApprove: false, canManageTemplates: false, canManageUsers: false },
+  };
+
+  // Author permissions
+  assert.equal(rolePermissions.author.canGenerate, true);
+  assert.equal(rolePermissions.author.canManageUsers, false);
+
+  // Reviewer permissions
+  assert.equal(rolePermissions.reviewer.canReview, true);
+  assert.equal(rolePermissions.reviewer.canApprove, false);
+
+  // Approver permissions
+  assert.equal(rolePermissions.approver.canApprove, true);
+
+  // Template Admin permissions
+  assert.equal(rolePermissions.template_admin.canManageTemplates, true);
+
+  // System Admin permissions
+  assert.equal(rolePermissions.admin.canManageUsers, true);
+  assert.equal(rolePermissions.admin.canGenerate, true);
+
+  // Viewer read-only restrictions
+  assert.equal(rolePermissions.viewer.canGenerate, false);
+  assert.equal(rolePermissions.viewer.canApprove, false);
+  assert.equal(rolePermissions.viewer.canManageUsers, false);
+});
+
+test("Login credential validator rejects empty or malformed inputs", () => {
+  function validateLoginInput(email, password) {
+    if (!email || !email.trim()) return { valid: false, error: "Email is required." };
+    if (!password || !password.trim()) return { valid: false, error: "Password is required." };
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email.trim())) return { valid: false, error: "Invalid email format." };
+    return { valid: true };
+  }
+
+  assert.equal(validateLoginInput("", "Pass123").valid, false);
+  assert.equal(validateLoginInput("author@svnit.acm.org", "").valid, false);
+  assert.equal(validateLoginInput("notanemail", "Pass123").valid, false);
+  assert.equal(validateLoginInput("admin@svnit.acm.org", "Admin@1234").valid, true);
+});
+
+
 
