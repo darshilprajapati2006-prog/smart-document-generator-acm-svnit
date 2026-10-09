@@ -217,10 +217,18 @@ def send_email(
             # In production when SMTP is explicitly configured, failure to send returns False
             return False
     else:
-        # Development / test mode: safe simulated delivery
+        # Development / test mode: safe simulated delivery with terminal console banner
         logger.info("[DEV EMAIL] SMTP_HOST not set. Captured message for %s (Purpose: %s)", to_email, purpose)
         record["live_delivery"] = False
         LAST_SENT_EMAILS.append(record)
+        print("\n" + "=" * 58, flush=True)
+        print("📨 [SMARTDOCS DEV EMAIL - VERIFICATION CODE]", flush=True)
+        print(f"To:      {to_email}", flush=True)
+        print(f"Subject: {subject}", flush=True)
+        if otp_code:
+            print(f"🔑 OTP CODE: {otp_code}", flush=True)
+        print("💡 Note: Add SMTP_HOST & SMTP_PASSWORD to backend/.env for real inbox delivery.", flush=True)
+        print("=" * 58 + "\n", flush=True)
         return True
 
 def send_signup_otp_email(
