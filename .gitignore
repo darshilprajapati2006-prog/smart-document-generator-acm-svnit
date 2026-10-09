@@ -226,4 +226,8 @@ dist/
 
 # Application generated documents
 backend/generated_docs/
+backend/data/*.db
+backend/data/*.db-*
+*.sqlite
+*.db
 

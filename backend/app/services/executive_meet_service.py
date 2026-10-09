@@ -137,18 +137,11 @@ class ExecutiveMeetService:
         r_sec.bold = True
         r_sec.font.size = Pt(10.5)
 
-        # Main Table: About the event
-        table = doc.add_table(rows=5, cols=2)
-        table.alignment = WD_TABLE_ALIGNMENT.CENTER
-        table.autofit = False
-        
-        col_w = [Inches(1.8), Inches(5.2)]
-        for row in table.rows:
-            row.cells[0].width = col_w[0]
-            row.cells[1].width = col_w[1]
-
         # Combine description with venue and schedule request as in official document
-        full_desc = f"{data.brief_description}\n\nWe request permission to use {data.venue} on {data.event_date} from {data.time_from} to {data.time_to} for conducting the meet."
+        venue_display = data.venue
+        if data.mode.lower() == "online" and getattr(data, "online_meeting_platform", None):
+            venue_display = f"{data.online_meeting_platform} (Online)"
+        full_desc = f"{data.brief_description}\n\nWe request permission to use {venue_display} on {data.event_date} from {data.time_from} to {data.time_to} for conducting the meet."
 
         table_data = [
             ("Brief Description", full_desc),
@@ -157,6 +150,21 @@ class ExecutiveMeetService:
             ("Mode", data.mode),
             ("Event Organizers", data.organizers),
         ]
+
+        if data.mode.lower() == "online" and getattr(data, "online_meeting_link", None):
+            table_data.append(("Online Meeting Link", data.online_meeting_link))
+        if getattr(data, "has_agenda", False) and getattr(data, "agenda_items", None):
+            table_data.append(("Meeting Agenda", data.agenda_items))
+
+        # Main Table: About the event
+        table = doc.add_table(rows=len(table_data), cols=2)
+        table.alignment = WD_TABLE_ALIGNMENT.CENTER
+        table.autofit = False
+        
+        col_w = [Inches(1.8), Inches(5.2)]
+        for row in table.rows:
+            row.cells[0].width = col_w[0]
+            row.cells[1].width = col_w[1]
 
         for i, (label, content) in enumerate(table_data):
             c_label = table.rows[i].cells[0]
@@ -374,7 +382,10 @@ class ExecutiveMeetService:
         story.append(Spacer(1, 4))
 
         # Event details table
-        full_desc = f"{data.brief_description}<br/><br/>We request permission to use {data.venue} on {data.event_date} from {data.time_from} to {data.time_to} for conducting the meet."
+        venue_display = data.venue
+        if data.mode.lower() == "online" and getattr(data, "online_meeting_platform", None):
+            venue_display = f"{data.online_meeting_platform} (Online)"
+        full_desc = f"{data.brief_description}<br/><br/>We request permission to use {venue_display} on {data.event_date} from {data.time_from} to {data.time_to} for conducting the meet."
 
         table_rows = [
             [Paragraph("<b>Brief Description</b>", bold_style), Paragraph(full_desc, body_style)],
@@ -383,6 +394,11 @@ class ExecutiveMeetService:
             [Paragraph("<b>Mode</b>", bold_style), Paragraph(data.mode, body_style)],
             [Paragraph("<b>Event Organizers</b>", bold_style), Paragraph(data.organizers, body_style)],
         ]
+
+        if data.mode.lower() == "online" and getattr(data, "online_meeting_link", None):
+            table_rows.append([Paragraph("<b>Online Meeting Link</b>", bold_style), Paragraph(data.online_meeting_link, body_style)])
+        if getattr(data, "has_agenda", False) and getattr(data, "agenda_items", None):
+            table_rows.append([Paragraph("<b>Meeting Agenda</b>", bold_style), Paragraph(data.agenda_items, body_style)])
 
         event_table = Table(table_rows, colWidths=[1.8*inch, 5.6*inch])
         event_table.setStyle(TableStyle([

@@ -24,6 +24,12 @@ class ExecutiveMeetRequest(BaseModel):
     mode: str = Field(default="Offline", description="Mode of conduct (Offline, Online, Hybrid)")
     organizers: str = Field(default="ACM Core 2026-27", description="Organizing committee / club name")
     
+    # Conditional / Dynamic Section Fields
+    online_meeting_platform: Optional[str] = Field(default="", description="Platform for online events (e.g. Google Meet, Zoom)")
+    online_meeting_link: Optional[str] = Field(default="", description="Join URL for online sessions")
+    has_agenda: Optional[bool] = Field(default=False, description="Toggle to display formal agenda section")
+    agenda_items: Optional[str] = Field(default="", description="Agenda points or schedule outline")
+    
     # Signatories
     lead_name: str = Field(default="Ansh Gupta", description="Student Head / Chairperson")
     lead_designation: str = Field(default="Chairperson, ACM", description="Lead designation")

@@ -25,6 +25,9 @@ class BillCertificateRequest(BaseModel):
     
     items: List[BillItem] = Field(min_length=1, description="List of expenditure items")
     taxes_or_other_charges: float = Field(default=0.0, ge=0, description="Applicable taxes or delivery charges")
+    has_taxes: Optional[bool] = Field(default=False, description="Flag indicating explicit tax details")
+    tax_details: Optional[str] = Field(default="", description="Detailed tax specification (e.g. CGST 9% + SGST 9%)")
+    advance_adjustment_notes: Optional[str] = Field(default="", description="Notes regarding advance adjustment if applicable")
     
     # Supplier Details
     supplier_name: str = Field(description="Name of the vendor/supplier")

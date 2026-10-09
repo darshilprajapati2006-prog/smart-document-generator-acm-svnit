@@ -221,7 +221,8 @@ class BillCertificateService:
         row_tax.cells[0].merge(row_tax.cells[3])
         p_tax = row_tax.cells[0].paragraphs[0]
         p_tax.alignment = WD_ALIGN_PARAGRAPH.RIGHT
-        p_tax.add_run("+ Taxes or other charges:").bold = True
+        tax_lbl = f"+ Taxes ({data.tax_details}):" if getattr(data, "tax_details", None) else "+ Taxes or other charges:"
+        p_tax.add_run(tax_lbl).bold = True
         p_tax.runs[0].font.size = Pt(8.5)
         p_tax_val = row_tax.cells[4].paragraphs[0]
         p_tax_val.alignment = WD_ALIGN_PARAGRAPH.RIGHT
@@ -495,8 +496,9 @@ class BillCertificateService:
             "", Paragraph("<b>Total Amount (Rs.)</b>", body_right_bold), "", "",
             Paragraph(f"<b>{subtotal:.2f}</b>", body_right_bold)
         ])
+        pdf_tax_lbl = f"<b>+ Taxes ({data.tax_details})</b>" if getattr(data, "tax_details", None) else "<b>+ Taxes or other charges</b>"
         item_rows.append([
-            "", Paragraph("<b>+ Taxes or other charges</b>", body_right_bold), "", "",
+            "", Paragraph(pdf_tax_lbl, body_right_bold), "", "",
             Paragraph(f"{taxes:.2f}", body_right)
         ])
         item_rows.append([

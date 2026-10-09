@@ -19,6 +19,8 @@ class BillSummaryRequest(BaseModel):
         description="Event context or activity summary"
     )
     rows: List[BillSummaryRow] = Field(min_length=1, description="List of payment rows")
+    has_bank_transfer_breakdown: Optional[bool] = Field(default=False, description="Display dedicated bank routing breakdown table")
+    expense_categories: Optional[str] = Field(default="", description="Comma-separated expense categories included")
     
     # Signatories
     student_head_name: str = Field(default="Ansh Gupta", description="Student Head")
