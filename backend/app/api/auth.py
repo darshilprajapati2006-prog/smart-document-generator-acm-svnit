@@ -28,7 +28,8 @@ from app.core.security import (
 from app.services.email_service import (
     send_signup_otp_email,
     send_login_otp_email,
-    send_password_reset_otp_email
+    send_password_reset_otp_email,
+    get_last_delivery_error
 )
 from app.services.otp_service import (
     issue_otp_challenge,
@@ -281,9 +282,12 @@ def register_user(request: UserRegisterRequest, req: Request):
         email_sent = send_signup_otp_email(request.email, request.full_name, raw_otp)
         if not email_sent:
             conn.rollback()
+            err_detail = get_last_delivery_error() or (
+                "Unable to send email verification code via email service. Please check RESEND_API_KEY and EMAIL_FROM configuration or try again."
+            )
             raise HTTPException(
                 status_code=502,
-                detail="Unable to send email verification code via email service. Please check RESEND_API_KEY and EMAIL_FROM configuration or try again."
+                detail=err_detail
             )
 
         # 4. Audit Log
@@ -375,7 +379,15 @@ def resend_email_otp(request: ResendEmailOtpRequest):
         except OTPCooldownError as ce:
             raise HTTPException(status_code=429, detail=str(ce))
 
-        send_signup_otp_email(request.email, user["full_name"], raw_otp)
+        email_sent = send_signup_otp_email(request.email, user["full_name"], raw_otp)
+        if not email_sent:
+            err_detail = get_last_delivery_error() or (
+                "Unable to resend email verification code via email service. Please check configuration or try again."
+            )
+            raise HTTPException(
+                status_code=502,
+                detail=err_detail
+            )
 
     return {
         "success": True,
@@ -449,9 +461,12 @@ def login_user(request: UserLoginRequest, req: Request):
         email_sent = send_login_otp_email(request.email, user_row["full_name"], raw_otp)
         if not email_sent:
             conn.rollback()
+            err_detail = get_last_delivery_error() or (
+                "Unable to send login verification code via email service. Please check RESEND_API_KEY and EMAIL_FROM configuration or try again."
+            )
             raise HTTPException(
                 status_code=502,
-                detail="Unable to send login verification code via email service. Please check RESEND_API_KEY and EMAIL_FROM configuration or try again."
+                detail=err_detail
             )
 
         record_audit_log(

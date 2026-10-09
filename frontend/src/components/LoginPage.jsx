@@ -655,6 +655,16 @@ export default function LoginPage({ onLoginSuccess }) {
                   boxSizing: "border-box",
                 }}
               />
+              <div
+                style={{
+                  marginTop: "6px",
+                  fontSize: "0.76rem",
+                  color: "#94a3b8",
+                  lineHeight: 1.35,
+                }}
+              >
+                💡 Live Resend Sandbox: Use your verified Resend account email (e.g. <b>darshilprajapati2006@gmail.com</b>) to receive the live OTP in your inbox.
+              </div>
             </div>
 
             <div style={{ marginBottom: "16px" }}>

@@ -21,6 +21,12 @@ RESEND_API_URL = "https://api.resend.com/emails"
 
 # Test & Debug in-memory message log (stores delivery records for test assertions)
 LAST_SENT_EMAILS: List[Dict[str, Any]] = []
+_LAST_DELIVERY_ERROR: Optional[str] = None
+
+def get_last_delivery_error() -> Optional[str]:
+    """Returns the most recent email delivery failure reason for client-facing feedback."""
+    return _LAST_DELIVERY_ERROR
+
 
 def get_email_config() -> Dict[str, Any]:
     """Reads Resend configuration from server-side environment variables."""
@@ -214,6 +220,8 @@ def send_email(
                 )
 
             if res.status_code in (200, 201):
+                global _LAST_DELIVERY_ERROR
+                _LAST_DELIVERY_ERROR = None
                 res_data = res.json()
                 record["live_delivery"] = True
                 record["provider_id"] = res_data.get("id")
@@ -236,10 +244,28 @@ def send_email(
                 )
                 record["delivery_error"] = f"Resend HTTP {res.status_code}: {err_msg}"
                 LAST_SENT_EMAILS.append(record)
+
+                if res.status_code == 403 and "only send testing emails" in err_msg.lower():
+                    _LAST_DELIVERY_ERROR = (
+                        "Resend Sandbox mode: onboarding@resend.dev can only deliver to your verified Resend account email (darshilprajapati2006@gmail.com). "
+                        "To test right now, please register using darshilprajapati2006@gmail.com, or verify a custom domain at resend.com/domains."
+                    )
+                    # Print helper in local server console so developer can see
+                    print("\n" + "=" * 58, flush=True)
+                    print("⚠️  [RESEND SANDBOX RESTRICTION]", flush=True)
+                    print(f"To:      {to_email}", flush=True)
+                    print(f"Notice:  {_LAST_DELIVERY_ERROR}", flush=True)
+                    if otp_code:
+                        print(f"🔑 Local Dev OTP Code: {otp_code}", flush=True)
+                    print("=" * 58 + "\n", flush=True)
+                else:
+                    _LAST_DELIVERY_ERROR = f"Email delivery failed (Resend HTTP {res.status_code}): {err_msg}"
+
                 return False
 
         except Exception as exc:
             logger.error("Resend connection error when sending to %s: %s", to_email, str(exc))
+            _LAST_DELIVERY_ERROR = f"Email service connection error: {str(exc)}"
             record["delivery_error"] = str(exc)
             LAST_SENT_EMAILS.append(record)
             return False
