@@ -192,12 +192,18 @@ export async function fetchWorkflowHistory(docId) {
 // -------------------------------------------------------------
 
 export async function fetchClauses(documentType) {
-  const url = documentType
-    ? `${API_BASE_URL}/api/documents/clauses/list?document_type=${documentType}`
-    : `${API_BASE_URL}/api/documents/clauses/list`;
-  const res = await fetch(url, { headers: getHeaders() });
-  if (!res.ok) throw new Error("Failed to fetch reusable clauses.");
-  return res.json();
+  const param = documentType ? `?document_type=${encodeURIComponent(documentType)}` : "";
+  try {
+    let res = await fetch(`${API_BASE_URL}/api/documents/clauses${param}`, { headers: getHeaders() });
+    if (!res.ok) {
+      res = await fetch(`${API_BASE_URL}/api/documents/clauses/list${param}`, { headers: getHeaders() });
+    }
+    if (!res.ok) throw new Error(`HTTP ${res.status}: Failed to fetch reusable clauses.`);
+    return await res.json();
+  } catch (err) {
+    console.warn("fetchClauses error:", err);
+    throw err;
+  }
 }
 
 export async function interpolateClause(clauseId, content, context) {

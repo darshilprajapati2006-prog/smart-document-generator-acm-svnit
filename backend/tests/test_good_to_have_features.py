@@ -290,13 +290,40 @@ def test_approval_workflow_lifecycle_and_permissions():
 # ============================================================
 
 def test_reusable_clauses_listing_and_interpolation():
-    res = client.get("/api/documents/clauses/list?document_type=exec_meet")
-    assert res.status_code == 200
-    clauses = res.json()["clauses"]
-    assert len(clauses) > 0
+    # 1. Executive Meet clauses
+    res_exec = client.get("/api/documents/clauses/list?document_type=exec_meet")
+    assert res_exec.status_code == 200
+    clauses_exec = res_exec.json()["clauses"]
+    assert len(clauses_exec) >= 4
+    for c in clauses_exec:
+        assert c["id"].startswith("cl-")
+        assert c["name"]
+        assert c["content"]
+        assert "exec_meet" in c["applicable_types_list"]
+        assert c["approval_status"] in ["pre_approved", "sample_draft"]
+        assert isinstance(c["variables"], list)
 
-    # Test interpolation
-    raw_text = "The event {{event_name}} will take place at {{venue}} on {{event_date}}."
+    # 2. Bill Certificate clauses
+    res_bill_cert = client.get("/api/documents/clauses?document_type=bill_certificate")
+    assert res_bill_cert.status_code == 200
+    clauses_bill_cert = res_bill_cert.json()["clauses"]
+    assert len(clauses_bill_cert) >= 3
+    assert any(c["id"] == "cl-bill-cert-audit" for c in clauses_bill_cert)
+
+    # 3. Bill Summary clauses
+    res_bill_sum = client.get("/api/documents/clauses?document_type=bill_summary")
+    assert res_bill_sum.status_code == 200
+    clauses_bill_sum = res_bill_sum.json()["clauses"]
+    assert len(clauses_bill_sum) >= 3
+    assert any(c["id"] == "cl-bill-sum-contingency" for c in clauses_bill_sum)
+
+    # 4. Nonexistent document type returns empty list
+    res_empty = client.get("/api/documents/clauses?document_type=nonexistent_doc_type")
+    assert res_empty.status_code == 200
+    assert res_empty.json()["clauses"] == []
+
+    # 5. Safe variable interpolation with missing variables
+    raw_text = "The event {{event_name}} will take place at {{venue}} on {{event_date}} coordinated by {{lead_name}}."
     context = {"event_name": "Cloud Day", "venue": "Seminar Hall 402"}
     inter_res = client.post("/api/documents/clauses/interpolate", json={
         "content": raw_text,
@@ -306,8 +333,19 @@ def test_reusable_clauses_listing_and_interpolation():
     data = inter_res.json()
     assert "Cloud Day" in data["rendered_content"]
     assert "Seminar Hall 402" in data["rendered_content"]
-    assert "[Event Date]" in data["rendered_content"] # missing key rendered safely
+    assert "[Event Date]" in data["rendered_content"]  # missing key rendered safely
+    assert "[Lead Name]" in data["rendered_content"]
     assert "event_date" in data["missing_variables"]
+    assert "lead_name" in data["missing_variables"]
+    assert set(data["used_variables"]) == {"event_name", "venue", "event_date", "lead_name"}
+
+    # 6. Interpolation by clause_id lookup
+    inter_by_id = client.post("/api/documents/clauses/interpolate", json={
+        "clause_id": "cl-exec-hall-guidelines",
+        "context": {"event_date": "15 November 2026"}
+    })
+    assert inter_by_id.status_code == 200
+    assert "15 November 2026" in inter_by_id.json()["rendered_content"]
 
 # ============================================================
 # FEATURE 8: TEMPLATE PREVIEW / EDITOR

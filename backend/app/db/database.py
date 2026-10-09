@@ -103,10 +103,15 @@ def init_db():
             applicable_types TEXT NOT NULL, -- comma separated e.g. exec_meet,bill_certificate
             content TEXT NOT NULL,
             variables_json TEXT DEFAULT '[]',
+            approval_status TEXT DEFAULT 'sample_draft',
             active INTEGER NOT NULL DEFAULT 1,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
         """)
+        try:
+            conn.execute("ALTER TABLE reusable_clauses ADD COLUMN approval_status TEXT DEFAULT 'sample_draft'")
+        except Exception:
+            pass
 
         # 6. Template Configurations table
         conn.execute("""

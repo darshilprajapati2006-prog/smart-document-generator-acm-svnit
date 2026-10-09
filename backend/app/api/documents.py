@@ -839,6 +839,7 @@ class ClauseCreateRequest(BaseModel):
     applicable_types: str
     content: str
     variables: Optional[List[str]] = None
+    approval_status: Optional[str] = "sample_draft"
 
 class ClauseUpdateRequest(BaseModel):
     name: Optional[str] = None
@@ -846,6 +847,7 @@ class ClauseUpdateRequest(BaseModel):
     applicable_types: Optional[str] = None
     content: Optional[str] = None
     variables: Optional[List[str]] = None
+    approval_status: Optional[str] = None
     active: Optional[bool] = None
 
 class ClauseInterpolateRequest(BaseModel):
@@ -870,7 +872,8 @@ def create_reusable_clause(
         category=req.category,
         applicable_types=req.applicable_types,
         content=req.content,
-        variables=req.variables
+        variables=req.variables,
+        approval_status=req.approval_status
     )
     return created
 
@@ -888,6 +891,7 @@ def update_reusable_clause(
         applicable_types=req.applicable_types,
         content=req.content,
         variables=req.variables,
+        approval_status=req.approval_status,
         active=req.active
     )
     if not updated:

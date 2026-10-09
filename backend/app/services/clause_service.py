@@ -48,17 +48,19 @@ class ClauseService:
         applicable_types: str,
         content: str,
         variables: Optional[List[str]] = None,
-        clause_id: Optional[str] = None
+        clause_id: Optional[str] = None,
+        approval_status: Optional[str] = "sample_draft"
     ) -> Dict[str, Any]:
         cid = clause_id or f"cl-{uuid.uuid4().hex[:8]}"
         vars_json = json.dumps(variables or [])
+        status = approval_status or "sample_draft"
         with get_db() as conn:
             conn.execute(
                 """
-                INSERT INTO reusable_clauses (id, name, category, applicable_types, content, variables_json, active)
-                VALUES (?, ?, ?, ?, ?, ?, 1)
+                INSERT INTO reusable_clauses (id, name, category, applicable_types, content, variables_json, approval_status, active)
+                VALUES (?, ?, ?, ?, ?, ?, ?, 1)
                 """,
-                (cid, name, category, applicable_types, content, vars_json)
+                (cid, name, category, applicable_types, content, vars_json, status)
             )
         return ClauseService.get_clause(cid)
 
@@ -70,6 +72,7 @@ class ClauseService:
         applicable_types: Optional[str] = None,
         content: Optional[str] = None,
         variables: Optional[List[str]] = None,
+        approval_status: Optional[str] = None,
         active: Optional[bool] = None
     ) -> Optional[Dict[str, Any]]:
         existing = ClauseService.get_clause(clause_id)
@@ -81,16 +84,17 @@ class ClauseService:
         updated_types = applicable_types if applicable_types is not None else existing["applicable_types"]
         updated_content = content if content is not None else existing["content"]
         updated_vars = json.dumps(variables) if variables is not None else existing["variables_json"]
+        updated_status = approval_status if approval_status is not None else existing.get("approval_status", "sample_draft")
         updated_active = (1 if active else 0) if active is not None else existing["active"]
 
         with get_db() as conn:
             conn.execute(
                 """
                 UPDATE reusable_clauses
-                SET name = ?, category = ?, applicable_types = ?, content = ?, variables_json = ?, active = ?
+                SET name = ?, category = ?, applicable_types = ?, content = ?, variables_json = ?, approval_status = ?, active = ?
                 WHERE id = ?
                 """,
-                (updated_name, updated_cat, updated_types, updated_content, updated_vars, updated_active, clause_id)
+                (updated_name, updated_cat, updated_types, updated_content, updated_vars, updated_status, updated_active, clause_id)
             )
         return ClauseService.get_clause(clause_id)
 

@@ -572,29 +572,56 @@ export default function App() {
   }
 
   // FEATURE 6: INSERT APPROVED CLAUSE
-  function handleInsertClause(interpolatedText) {
+  function handleInsertClause(interpolatedText, targetField) {
     if (selectedType === "exec_meet") {
-      setExecData((prev) => ({
-        ...prev,
-        brief_description: prev.brief_description
-          ? `${prev.brief_description}\n\n${interpolatedText}`
-          : interpolatedText,
-      }));
+      if (targetField === "objective") {
+        setExecData((prev) => ({
+          ...prev,
+          objective: prev.objective
+            ? `${prev.objective}\n\n${interpolatedText}`
+            : interpolatedText,
+        }));
+      } else {
+        setExecData((prev) => ({
+          ...prev,
+          brief_description: prev.brief_description
+            ? `${prev.brief_description}\n\n${interpolatedText}`
+            : interpolatedText,
+        }));
+      }
     } else if (selectedType === "bill_certificate") {
-      setBillCertData((prev) => ({
-        ...prev,
-        tax_details: prev.tax_details
-          ? `${prev.tax_details}\n\n${interpolatedText}`
-          : interpolatedText,
-        has_taxes: true,
-      }));
+      if (targetField === "expenditure_purpose") {
+        setBillCertData((prev) => ({
+          ...prev,
+          expenditure_purpose: prev.expenditure_purpose
+            ? `${prev.expenditure_purpose} — ${interpolatedText}`
+            : interpolatedText,
+        }));
+      } else {
+        setBillCertData((prev) => ({
+          ...prev,
+          tax_details: prev.tax_details
+            ? `${prev.tax_details}\n\n${interpolatedText}`
+            : interpolatedText,
+          has_taxes: true,
+        }));
+      }
     } else if (selectedType === "bill_summary") {
-      setBillSummaryData((prev) => ({
-        ...prev,
-        subtitle: prev.subtitle
-          ? `${prev.subtitle} — ${interpolatedText}`
-          : interpolatedText,
-      }));
+      if (targetField === "title") {
+        setBillSummaryData((prev) => ({
+          ...prev,
+          title: prev.title
+            ? `${prev.title} (${interpolatedText})`
+            : interpolatedText,
+        }));
+      } else {
+        setBillSummaryData((prev) => ({
+          ...prev,
+          subtitle: prev.subtitle
+            ? `${prev.subtitle} — ${interpolatedText}`
+            : interpolatedText,
+        }));
+      }
     }
     setShowClausesModal(false);
     setNlpFeedback({ type: "success", message: "Approved clause inserted into document form." });
@@ -2273,8 +2300,17 @@ export default function App() {
       <ClausesModal
         isOpen={showClausesModal}
         onClose={() => setShowClausesModal(false)}
+        onInsertClause={handleInsertClause}
         onSelectClause={handleInsertClause}
         docType={selectedType}
+        documentType={selectedType}
+        formValues={
+          selectedType === "exec_meet"
+            ? execData
+            : selectedType === "bill_certificate"
+            ? billCertData
+            : billSummaryData
+        }
       />
 
       {/* EMAIL DISTRIBUTION MODAL */}

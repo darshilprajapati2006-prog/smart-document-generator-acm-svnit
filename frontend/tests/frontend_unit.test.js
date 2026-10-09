@@ -202,23 +202,96 @@ test("Conditional section evaluation determines active fields correctly", () => 
   assert.equal(onlineWithAgenda.agenda, true);
 });
 
-// Good-to-Have Feature 6: Safe Clause Variable Interpolation
-test("Clause variable interpolation correctly substitutes placeholders", () => {
+// Good-to-Have Feature 6: Safe Clause Variable Interpolation & Insertion Tests
+test("Clause variable interpolation correctly substitutes placeholders and validates missing variables", () => {
   function interpolateClause(template, variables) {
-    let result = template;
-    for (const [key, value] of Object.entries(variables)) {
-      result = result.replaceAll(`{{${key}}}`, value || "");
-    }
-    return result;
+    const regex = /\{\{([a-zA-Z0-9_]+)\}\}/g;
+    const missing = [];
+    const used = [];
+    const rendered = template.replace(regex, (_, key) => {
+      used.push(key);
+      if (variables[key] !== undefined && String(variables[key]).trim() !== "") {
+        return String(variables[key]);
+      }
+      missing.push(key);
+      return `[${key.replace(/_/g, " ").toUpperCase()}]`;
+    });
+    return { rendered, missing, used };
   }
 
-  const clauseText = "Permission requested for {{event_name}} on {{date}} at {{venue}}.";
-  const filled = interpolateClause(clauseText, {
+  const clauseText = "Permission requested for {{event_name}} on {{event_date}} at {{venue}} coordinated by {{lead_name}}.";
+  
+  // Case A: Partial context
+  const partial = interpolateClause(clauseText, {
     event_name: "AI Hackathon",
-    date: "15/10/2026",
-    venue: "Seminar Hall 402",
+    venue: "Seminar Hall 402"
   });
+  assert.equal(partial.rendered, "Permission requested for AI Hackathon on [EVENT DATE] at Seminar Hall 402 coordinated by [LEAD NAME].");
+  assert.deepEqual(partial.missing, ["event_date", "lead_name"]);
 
-  assert.equal(filled, "Permission requested for AI Hackathon on 15/10/2026 at Seminar Hall 402.");
+  // Case B: Full context
+  const complete = interpolateClause(clauseText, {
+    event_name: "AI Hackathon",
+    venue: "Seminar Hall 402",
+    event_date: "28/10/2026",
+    lead_name: "Darshil Prajapati"
+  });
+  assert.equal(complete.rendered, "Permission requested for AI Hackathon on 28/10/2026 at Seminar Hall 402 coordinated by Darshil Prajapati.");
+  assert.deepEqual(complete.missing, []);
 });
+
+test("Clause document-type filtering provides appropriate clauses for all 3 document types", () => {
+  const mockCatalog = [
+    { id: "cl-exec-1", types: ["exec_meet"], approval: "pre_approved" },
+    { id: "cl-exec-2", types: ["exec_meet"], approval: "sample_draft" },
+    { id: "cl-bill-cert-1", types: ["bill_certificate"], approval: "pre_approved" },
+    { id: "cl-bill-sum-1", types: ["bill_summary"], approval: "pre_approved" }
+  ];
+
+  const filterByDocType = (type) => mockCatalog.filter(c => c.types.includes(type));
+
+  const execClauses = filterByDocType("exec_meet");
+  assert.equal(execClauses.length, 2);
+  assert.ok(execClauses.some(c => c.approval === "pre_approved"));
+  assert.ok(execClauses.some(c => c.approval === "sample_draft"));
+
+  const certClauses = filterByDocType("bill_certificate");
+  assert.equal(certClauses.length, 1);
+
+  const sumClauses = filterByDocType("bill_summary");
+  assert.equal(sumClauses.length, 1);
+
+  const unknownClauses = filterByDocType("nonexistent");
+  assert.equal(unknownClauses.length, 0);
+});
+
+test("Inserting a clause updates the selected document section without overwriting unrelated form fields", () => {
+  const initialExecForm = {
+    event_name: "Annual General Meet",
+    event_date: "2026-11-15",
+    venue: "Seminar Hall",
+    brief_description: "Initial description.",
+    objective: "Initial objective."
+  };
+
+  const clauseText = "Certified decorum rules apply.";
+
+  // Inserting into brief_description
+  const updatedFormBrief = {
+    ...initialExecForm,
+    brief_description: `${initialExecForm.brief_description}\n\n${clauseText}`
+  };
+  assert.equal(updatedFormBrief.brief_description, "Initial description.\n\nCertified decorum rules apply.");
+  assert.equal(updatedFormBrief.event_name, "Annual General Meet"); // Unrelated field intact
+  assert.equal(updatedFormBrief.objective, "Initial objective."); // Unrelated field intact
+
+  // Inserting into objective
+  const updatedFormObj = {
+    ...initialExecForm,
+    objective: `${initialExecForm.objective}\n\n${clauseText}`
+  };
+  assert.equal(updatedFormObj.objective, "Initial objective.\n\nCertified decorum rules apply.");
+  assert.equal(updatedFormObj.brief_description, "Initial description."); // Unrelated field intact
+});
+
 
