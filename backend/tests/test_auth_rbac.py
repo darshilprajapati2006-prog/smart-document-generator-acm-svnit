@@ -90,6 +90,33 @@ def test_signup_registration_requires_firebase_email_verification():
     assert verified.json()["user"]["is_verified"] == 1
 
 
+def test_verified_firebase_account_can_finish_missing_smartdocs_profile():
+    email = f"recovery_{uuid.uuid4().hex[:8]}@aid.svnit.ac.in"
+    uid = f"uid-{uuid.uuid4().hex}"
+    headers = firebase_headers(email, uid, verified=True)
+
+    registration = client.post("/api/auth/register", headers=headers, json={
+        "requested_role": "author",
+        "full_name": "Verified SVNIT Student",
+        "email": email,
+    })
+    assert registration.status_code == 200
+    assert registration.json()["requires_email_verification"] is False
+
+    session = client.post("/api/auth/session", headers=headers)
+    assert session.status_code == 200
+    assert session.json()["user"]["role"] == "author"
+    assert session.json()["user"]["email"] == email
+
+    from app.db.database import get_db
+    with get_db() as conn:
+        row = conn.execute("SELECT firebase_uid, full_name, role, is_verified FROM users WHERE email = ?", (email,)).fetchone()
+    assert row["firebase_uid"] == uid
+    assert row["full_name"] == "Verified SVNIT Student"
+    assert row["role"] == "author"
+    assert row["is_verified"] == 1
+
+
 def test_viewer_public_registration_and_role_escalation_rejection():
     email = f"viewer_{uuid.uuid4().hex[:6]}@aid.svnit.ac.in"
     uid = f"uid-{uuid.uuid4().hex}"

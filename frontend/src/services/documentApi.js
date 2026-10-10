@@ -299,11 +299,54 @@ export async function loginUser(email, password) {
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
+    if (res.status === 403 && err.detail === "No SmartDocs account found. Create an account first.") {
+      const profileError = new Error("Your verified Firebase account needs a SmartDocs profile. Complete the secure setup to continue.");
+      profileError.code = "smartdocs/profile-not-found";
+      throw profileError;
+    }
     await signOut(firebaseAuth);
     throw new Error(err.detail || "Authentication failed.");
   }
   const data = await res.json();
   return { access_token: token, user: data.user, requires_otp: false };
+}
+
+export async function completeVerifiedAccountSetup(fullName) {
+  await authReady;
+  const user = firebaseAuth.currentUser;
+  if (!user) throw new Error("Sign in with your Firebase account to continue.");
+  await reload(user);
+  if (!user.emailVerified) throw new Error("Verify your institutional email before completing account setup.");
+  if (!fullName?.trim()) throw new Error("Enter your full name to complete account setup.");
+
+  const token = await user.getIdToken(true);
+  const registration = await fetch(apiUrl("/api/auth/register"), {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({
+      requested_role: "author",
+      full_name: fullName.trim(),
+      email: user.email,
+    }),
+  });
+  if (!registration.ok) {
+    const result = await registration.json().catch(() => ({}));
+    throw new Error(result.detail || "Could not create your SmartDocs profile.");
+  }
+
+  const session = await postAuthSession(fetch, apiUrl(AUTH_SESSION_PATH), {
+    Authorization: `Bearer ${token}`,
+  });
+  if (!session.ok) {
+    const result = await session.json().catch(() => ({}));
+    throw new Error(result.detail || "Profile created, but sign-in could not be completed. Please try again.");
+  }
+  setAuthToken(token);
+  const data = await session.json();
+  return { access_token: token, user: data.user };
 }
 
 export async function registerUser({ role, full_name, email, password, confirm_password, invitation_token }) {
@@ -318,7 +361,8 @@ export async function registerUser({ role, full_name, email, password, confirm_p
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
-    await deleteUser(credential.user).catch(() => {});
+    // Keep Firebase accounts intact if profile creation fails; verified users
+    // can sign in and retry SmartDocs profile setup safely.
     throw new Error(err.detail || "Registration failed.");
   }
   await sendEmailVerification(credential.user, { url: window.location.origin });

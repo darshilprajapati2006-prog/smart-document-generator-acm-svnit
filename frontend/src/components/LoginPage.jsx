@@ -3,6 +3,7 @@ import { firebaseAuth } from "../services/firebase";
 import { reload, sendEmailVerification, signOut } from "firebase/auth";
 import {
   loginUser,
+  completeVerifiedAccountSetup,
   registerUser,
   forgotPassword,
   validateInvitation,
@@ -16,7 +17,7 @@ export default function LoginPage({ onLoginSuccess }) {
   const publicRoles = (import.meta.env.VITE_PUBLIC_REGISTRATION_ROLES || "author,viewer").split(",").map((role) => role.trim());
   const [invitation, setInvitation] = useState(null);
   const [view, setView] = useState(invitationToken ? "signup" : "signin");
-  // Views: sign in, signup, verification notice, and password recovery.
+  // Views: sign in, signup, verified-account setup, verification notice, and password recovery.
 
   // Sign In State
   const [loginEmail, setLoginEmail] = useState("");
@@ -84,7 +85,31 @@ export default function LoginPage({ onLoginSuccess }) {
       if (err.code === "auth/email-not-verified") {
         setActiveEmail(loginEmail.trim());
         setView("verify_email");
+      } else if (err.code === "smartdocs/profile-not-found") {
+        setActiveEmail(loginEmail.trim());
+        setFullName(firebaseAuth.currentUser?.displayName || "");
+        setErrorMessage("");
+        setView("profile_setup");
       }
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function handleCompleteExistingAccount(e) {
+    e.preventDefault();
+    resetFeedback();
+    if (!fullName.trim()) {
+      setErrorMessage("Enter your full name to continue.");
+      return;
+    }
+    setLoading(true);
+    try {
+      const data = await completeVerifiedAccountSetup(fullName);
+      localStorage.setItem("acm_doc_user", JSON.stringify(data.user));
+      if (onLoginSuccess) onLoginSuccess(data.user);
+    } catch (err) {
+      setErrorMessage(err.message || "Could not complete your SmartDocs profile.");
     } finally {
       setLoading(false);
     }
@@ -141,6 +166,12 @@ export default function LoginPage({ onLoginSuccess }) {
         setErrorMessage("We couldn't start registration. Please try again.");
       }
     } catch (err) {
+      if (err.code === "auth/email-already-in-use") {
+        setLoginEmail(registerEmail.trim());
+        setErrorMessage("This Firebase account already exists. Sign in with it to finish SmartDocs setup.");
+        setView("signin");
+        return;
+      }
       setErrorMessage(err.message || "Registration failed. Please check your details.");
       if (firebaseAuth.currentUser && !firebaseAuth.currentUser.emailVerified) {
         setActiveEmail(registerEmail.trim());
@@ -511,6 +542,34 @@ export default function LoginPage({ onLoginSuccess }) {
                 Sign Up
               </button>
             </div>
+          </form>
+        )}
+
+        {view === "profile_setup" && (
+          <form onSubmit={handleCompleteExistingAccount} style={{ padding: "24px 32px 28px" }}>
+            <h3 style={{ color: "#fff", margin: "0 0 10px" }}>Finish SmartDocs setup</h3>
+            <p style={{ color: "#cbd5e1", lineHeight: 1.6, margin: "0 0 18px" }}>
+              Your email is verified with Firebase, but this email does not have a SmartDocs profile yet. Confirm your name to create the standard Author profile for <strong>{activeEmail}</strong> and continue.
+            </p>
+            <label htmlFor="profile-full-name" style={{ display: "block", marginBottom: 6, color: "#cbd5e1", fontSize: "0.82rem", fontWeight: 600 }}>
+              Full Name
+            </label>
+            <input
+              id="profile-full-name"
+              value={fullName}
+              onChange={(event) => setFullName(event.target.value)}
+              autoComplete="name"
+              required
+              minLength={2}
+              style={{ width: "100%", padding: "11px 14px", borderRadius: 8, border: "1px solid rgba(255,255,255,0.15)", background: "rgba(15,23,42,0.6)", color: "#fff", fontSize: "0.9rem", boxSizing: "border-box" }}
+            />
+            {errorMessage && <p role="alert" style={{ color: "#fca5a5", lineHeight: 1.5 }}>{errorMessage}</p>}
+            <button type="submit" disabled={loading} style={{ width: "100%", marginTop: 18, padding: 12, border: 0, borderRadius: 8, color: "#fff", background: "linear-gradient(135deg,#0284c7,#2563eb)", cursor: loading ? "not-allowed" : "pointer" }}>
+              {loading ? "Setting up account…" : "Complete setup and open SmartDocs"}
+            </button>
+            <button type="button" onClick={() => { signOut(firebaseAuth); switchView("signin"); }} disabled={loading} style={{ display: "block", margin: "14px auto 0", background: "none", border: 0, color: "#38bdf8", cursor: "pointer" }}>
+              Back to sign in
+            </button>
           </form>
         )}
 
