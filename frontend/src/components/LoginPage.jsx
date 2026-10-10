@@ -8,6 +8,7 @@ import {
   resendEmailOtp,
   forgotPassword,
   resetPassword,
+  setAuthToken,
 } from "../services/documentApi";
 
 export default function LoginPage({ onLoginSuccess }) {
@@ -86,7 +87,8 @@ export default function LoginPage({ onLoginSuccess }) {
         setSuccessMessage(data.message || "Login verification code sent to your registered email.");
         setView("verify_login");
       } else if (data && data.access_token && data.user) {
-        // Direct session fallback (if 2FA was already completed)
+        // Direct password login (Requirement 17: no login OTP required)
+        setAuthToken(data.access_token);
         localStorage.setItem("acm_doc_user", JSON.stringify(data.user));
         if (onLoginSuccess) onLoginSuccess(data.user);
       } else {
@@ -118,6 +120,7 @@ export default function LoginPage({ onLoginSuccess }) {
         otp: otpCode.trim(),
       });
       if (data && data.user) {
+        if (data.access_token) setAuthToken(data.access_token);
         localStorage.setItem("acm_doc_user", JSON.stringify(data.user));
         if (onLoginSuccess) onLoginSuccess(data.user);
       } else {
@@ -182,10 +185,19 @@ export default function LoginPage({ onLoginSuccess }) {
         confirm_password: confirmPassword,
       });
 
-      setActiveEmail(registerEmail.trim());
-      setResendCooldown(data.cooldown_seconds || 60);
-      setSuccessMessage(data.message || "Verification code sent to your email.");
-      setView("verify_email");
+      if (data && (data.requires_otp === false || data.demo_mode)) {
+        // DEMO mode: Account created directly without email OTP
+        setSuccessMessage(data.message || "Account created! (DEMO Mode: Email Unverified). Please sign in with your password.");
+        setLoginEmail(registerEmail.trim());
+        setLoginPassword("");
+        setView("signin");
+      } else {
+        // Production: OTP verification required
+        setActiveEmail(registerEmail.trim());
+        setResendCooldown(data.cooldown_seconds || 60);
+        setSuccessMessage(data.message || "Verification code sent to your email.");
+        setView("verify_email");
+      }
     } catch (err) {
       setErrorMessage(err.message || "Registration failed. Please check your details.");
     } finally {
@@ -663,7 +675,7 @@ export default function LoginPage({ onLoginSuccess }) {
                   lineHeight: 1.35,
                 }}
               >
-                💡 Live Resend Sandbox: Use your verified Resend account email (e.g. <b>darshilprajapati2006@gmail.com</b>) to receive the live OTP in your inbox.
+                💡 Institutional SVNIT emails (e.g. <b>@svnit.ac.in</b>, <b>@aid.svnit.ac.in</b>) and test emails are supported. In Resend Sandbox mode, use your account email or enable DEMO mode on Render.
               </div>
             </div>
 

@@ -1201,6 +1201,22 @@ export default function App() {
               >
                 {roleDisplayNames[currentRole] || currentRole}
               </span>
+              {(currentUser.demo_mode || currentUser.is_verified === 0) && (
+                <span
+                  style={{
+                    fontSize: "0.68rem",
+                    fontWeight: 700,
+                    padding: "2px 6px",
+                    borderRadius: "6px",
+                    background: "#fef3c7",
+                    color: "#b45309",
+                    border: "1px solid #fde68a",
+                  }}
+                  title="DEMO Mode: Account created without email OTP. Email is unverified."
+                >
+                  ⚠️ Unverified (DEMO)
+                </span>
+              )}
             </div>
 
             {/* Admin User Management Modal Trigger */}

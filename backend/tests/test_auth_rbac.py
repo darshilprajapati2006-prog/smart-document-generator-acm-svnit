@@ -27,22 +27,14 @@ def setup_db(monkeypatch):
     seed_database()
 
 def helper_login(email: str, password: str) -> dict:
-    """Helper to perform full 2-step OTP login and return session payload."""
+    """Helper to perform password login (Requirement 17: no login OTP required) and return session payload."""
     res1 = client.post("/api/auth/login", json={"email": email, "password": password})
-    assert res1.status_code == 200, f"Login step 1 failed for {email}: {res1.text}"
+    assert res1.status_code == 200, f"Login failed for {email}: {res1.text}"
     data1 = res1.json()
-    assert data1["requires_otp"] is True
-    challenge_id = data1["challenge_id"]
-
-    otp = get_latest_sent_otp(email, "login_2fa")
-    assert otp is not None, f"Login 2FA OTP was not dispatched to {email}"
-
-    res2 = client.post("/api/auth/verify-login-otp", json={"challenge_id": challenge_id, "otp": otp})
-    assert res2.status_code == 200, f"Login step 2 failed for {email}: {res2.text}"
-    data2 = res2.json()
-    assert data2["success"] is True
-    assert "access_token" in data2
-    return data2
+    assert data1["success"] is True
+    assert "access_token" in data1
+    assert data1["requires_otp"] is False
+    return data1
 
 
 # ============================================================
@@ -90,9 +82,11 @@ def test_login_invalid_credentials_and_formats():
 
 def test_login_otp_tampering_and_replay_prevention():
     """Verify wrong OTP is rejected and OTP cannot be reused after verification."""
+    from app.services.otp_service import issue_otp_challenge
+    from app.db.database import get_db
     email = "author@svnit.acm.org"
-    res1 = client.post("/api/auth/login", json={"email": email, "password": "Author@1234"})
-    challenge_id = res1.json()["challenge_id"]
+    with get_db() as conn:
+        raw_otp, challenge_id = issue_otp_challenge(conn, email=email, purpose="login_2fa", user_id="usr-author-01")
 
     # Incorrect OTP
     bad_res = client.post("/api/auth/verify-login-otp", json={"challenge_id": challenge_id, "otp": "000000"})
@@ -100,12 +94,11 @@ def test_login_otp_tampering_and_replay_prevention():
     assert "attempt(s) remaining" in bad_res.json()["detail"].lower()
 
     # Correct OTP
-    valid_otp = get_latest_sent_otp(email, "login_2fa")
-    ok_res = client.post("/api/auth/verify-login-otp", json={"challenge_id": challenge_id, "otp": valid_otp})
+    ok_res = client.post("/api/auth/verify-login-otp", json={"challenge_id": challenge_id, "otp": raw_otp})
     assert ok_res.status_code == 200
 
     # Replay attempt with same challenge & OTP -> must fail
-    replay_res = client.post("/api/auth/verify-login-otp", json={"challenge_id": challenge_id, "otp": valid_otp})
+    replay_res = client.post("/api/auth/verify-login-otp", json={"challenge_id": challenge_id, "otp": raw_otp})
     assert replay_res.status_code == 400
 
 
@@ -361,3 +354,90 @@ def test_document_generation_role_permissions():
     admin_gen = client.post("/api/documents/executive-meet/generate", headers=admin_headers, json=doc_payload)
     assert admin_gen.status_code == 200
     assert admin_gen.json()["success"] is True
+
+
+def test_demo_auth_mode_lifecycle(monkeypatch):
+    """Verify DEMO mode allows signup/login without OTP and clearly marks email unverified."""
+    monkeypatch.setenv("DEMO_AUTH_MODE", "true")
+    email = f"demo_user_{uuid.uuid4().hex[:6]}@aid.svnit.ac.in"
+    pwd = "DemoPassword@123"
+
+    # 1. Mode endpoint reports demo mode
+    mode_res = client.get("/api/auth/mode")
+    assert mode_res.status_code == 200
+    assert mode_res.json()["demo_mode"] is True
+    assert mode_res.json()["email_verification_required"] is False
+
+    # 2. Register in DEMO mode -> no OTP required, clearly marked unverified
+    reg = client.post("/api/auth/register", json={
+        "full_name": "Demo Student",
+        "email": email,
+        "password": pwd,
+        "confirm_password": pwd
+    })
+    assert reg.status_code == 200
+    assert reg.json()["demo_mode"] is True
+    assert reg.json()["requires_otp"] is False
+    assert reg.json()["is_verified"] is False
+
+    # 3. Direct Login with password succeeds without OTP
+    login = client.post("/api/auth/login", json={"email": email, "password": pwd})
+    assert login.status_code == 200
+    assert login.json()["access_token"] is not None
+    assert login.json()["requires_otp"] is False
+    assert login.json()["user"]["is_verified"] == 0
+    assert login.json()["user"]["demo_mode"] is True
+
+    # 4. Forgot password in demo mode
+    forgot = client.post("/api/auth/forgot-password", json={"email": email})
+    assert forgot.status_code == 200
+    assert forgot.json()["demo_mode"] is True
+
+    # 5. Reset password using demo code '000000'
+    new_pwd = "NewDemoPass@456"
+    reset = client.post("/api/auth/reset-password", json={
+        "email": email,
+        "otp": "000000",
+        "new_password": new_pwd,
+        "confirm_password": new_pwd
+    })
+    assert reset.status_code == 200
+
+    # 6. Login with new password
+    new_login = client.post("/api/auth/login", json={"email": email, "password": new_pwd})
+    assert new_login.status_code == 200
+    assert new_login.json()["access_token"] is not None
+
+
+def test_approved_institutional_email_domains(monkeypatch):
+    """Verify SVNIT institutional domains and subdomains are permitted."""
+    monkeypatch.setenv("DEMO_AUTH_MODE", "false")
+    monkeypatch.setenv("ALLOW_ANY_EMAIL", "false")
+
+    # Approved SVNIT subdomain
+    valid_aid = client.post("/api/auth/register", json={
+        "full_name": "AI Dept Student",
+        "email": f"student_{uuid.uuid4().hex[:6]}@aid.svnit.ac.in",
+        "password": "Password@123",
+        "confirm_password": "Password@123"
+    })
+    assert valid_aid.status_code == 200
+
+    # Approved SVNIT main domain
+    valid_svnit = client.post("/api/auth/register", json={
+        "full_name": "Faculty Member",
+        "email": f"faculty_{uuid.uuid4().hex[:6]}@svnit.ac.in",
+        "password": "Password@123",
+        "confirm_password": "Password@123"
+    })
+    assert valid_svnit.status_code == 200
+
+    # Unapproved external domain when ALLOW_ANY_EMAIL is false
+    unapproved = client.post("/api/auth/register", json={
+        "full_name": "External User",
+        "email": "external@randomdomain123.com",
+        "password": "Password@123",
+        "confirm_password": "Password@123"
+    })
+    assert unapproved.status_code == 422 or unapproved.status_code == 400
+

@@ -391,25 +391,15 @@ def test_rbac_register_login_and_role_protection():
     assert verify_reg.status_code == 200
     assert verify_reg.json()["success"] is True
 
-    # 3. Login Step 1: Submit credentials to receive login OTP challenge
-    login_step1 = client.post("/api/auth/login", json={
+    # 3. Login: Submit credentials to receive access token directly (Requirement 17)
+    login_res = client.post("/api/auth/login", json={
         "email": email,
         "password": "Password@123"
     })
-    assert login_step1.status_code == 200
-    assert login_step1.json()["requires_otp"] is True
-    challenge_id = login_step1.json()["challenge_id"]
-
-    # 4. Login Step 2: Verify Login 2FA OTP to obtain access token
-    login_otp = get_latest_sent_otp(email, "login_2fa")
-    assert login_otp is not None, "Login 2FA OTP must be dispatched"
-    login_step2 = client.post("/api/auth/verify-login-otp", json={
-        "challenge_id": challenge_id,
-        "otp": login_otp
-    })
-    assert login_step2.status_code == 200
-    assert "access_token" in login_step2.json()
-    token = login_step2.json()["access_token"]
+    assert login_res.status_code == 200
+    assert login_res.json()["requires_otp"] is False
+    assert "access_token" in login_res.json()
+    token = login_res.json()["access_token"]
 
     # 5. Check profile
     me_res = client.get("/api/auth/me", headers={"Authorization": f"Bearer {token}"})

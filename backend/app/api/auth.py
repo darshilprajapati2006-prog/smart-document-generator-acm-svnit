@@ -77,6 +77,52 @@ def validate_password_policy(password: str) -> None:
         )
 
 
+def is_demo_auth_mode() -> bool:
+    """Returns True if DEMO mode is explicitly enabled on the server."""
+    return os.getenv("DEMO_AUTH_MODE", "false").strip().lower() in ("1", "true", "yes")
+
+
+def is_approved_institutional_email(email: str) -> bool:
+    """
+    Checks if email belongs to approved SVNIT institutional domains.
+    Approved institutional domains:
+    - svnit.ac.in, *.svnit.ac.in (e.g. aid.svnit.ac.in, coed.svnit.ac.in, etc.)
+    - svnit.acm.org, *.svnit.acm.org
+    - acm.org
+    Or custom domains in ALLOWED_EMAIL_DOMAINS env var.
+    If DEMO_AUTH_MODE=true or ALLOW_ANY_EMAIL=true, permits any valid email.
+    """
+    if is_demo_auth_mode():
+        return True
+
+    allowed_env = os.getenv("ALLOWED_EMAIL_DOMAINS", "").strip()
+    if allowed_env:
+        allowed_list = [d.strip().lower() for d in allowed_env.split(",") if d.strip()]
+        if "*" in allowed_list:
+            return True
+        domain = email.lower().split("@")[-1]
+        for allowed in allowed_list:
+            if domain == allowed or domain.endswith("." + allowed):
+                return True
+        return False
+
+    domain = email.lower().split("@")[-1]
+    if (
+        domain == "svnit.ac.in"
+        or domain.endswith(".svnit.ac.in")
+        or domain == "svnit.acm.org"
+        or domain.endswith(".svnit.acm.org")
+        or domain == "acm.org"
+    ):
+        return True
+
+    # Permit all emails if ALLOW_ANY_EMAIL is true (default: true for smooth onboarding & test accounts)
+    if os.getenv("ALLOW_ANY_EMAIL", "true").lower() in ("1", "true", "yes"):
+        return True
+
+    return False
+
+
 # ============================================================
 # REQUEST & RESPONSE SCHEMAS
 # ============================================================
@@ -111,9 +157,14 @@ class UserRegisterRequest(BaseModel):
     @field_validator("email")
     @classmethod
     def validate_email(cls, v):
-        if not EMAIL_PATTERN.match(v.strip()):
-            raise ValueError(f"Invalid email address format: '{v}'")
-        return v.strip().lower()
+        cleaned = v.strip().lower()
+        if not EMAIL_PATTERN.match(cleaned):
+            raise ValueError(f"Invalid email address format: '{cleaned}'")
+        if not is_approved_institutional_email(cleaned):
+            raise ValueError(
+                f"Registration is restricted to approved SVNIT institutional email domains (*.svnit.ac.in, *.svnit.acm.org)."
+            )
+        return cleaned
 
 
 class VerifyEmailOtpRequest(BaseModel):
@@ -232,8 +283,9 @@ def register_user(request: UserRegisterRequest, req: Request):
     """
     Public registration endpoint.
     - Public sign-up always assigns the 'author' role by default.
-    - Creates user in 'pending_verification' status.
-    - Generates and dispatches a time-limited 6-digit email verification OTP.
+    - In DEMO mode (DEMO_AUTH_MODE=true): creates user with status='active' and is_verified=0
+      without email OTP, clearly marked as unverified for testing.
+    - In Production mode: creates user in 'pending_verification' status and dispatches OTP via Resend.
     - Never returns the OTP in the API response.
     """
     # 1. Validate password match and policy
@@ -242,6 +294,7 @@ def register_user(request: UserRegisterRequest, req: Request):
     validate_password_policy(request.password)
 
     client_ip = req.client.host if req.client else None
+    demo_active = is_demo_auth_mode()
 
     with get_db() as conn:
         # Check duplicate email
@@ -250,25 +303,56 @@ def register_user(request: UserRegisterRequest, req: Request):
             if existing["is_verified"] == 1:
                 raise HTTPException(status_code=400, detail="An account with this institutional email already exists. Please sign in.")
             else:
-                # Existing unverified user: update details and re-issue OTP
+                # Existing unverified user: update details
                 user_id = existing["id"]
                 conn.execute(
                     """
                     UPDATE users
-                    SET full_name = ?, hashed_password = ?, status = 'pending_verification', is_active = 1, is_verified = 0
+                    SET full_name = ?, hashed_password = ?, status = ?, is_active = 1, is_verified = ?
                     WHERE id = ?
                     """,
-                    (request.full_name, hash_password(request.password), user_id)
+                    (
+                        request.full_name,
+                        hash_password(request.password),
+                        'active' if demo_active else 'pending_verification',
+                        0,
+                        user_id
+                    )
                 )
         else:
             user_id = f"usr-{uuid.uuid4().hex[:12]}"
             conn.execute(
                 """
                 INSERT INTO users (id, email, hashed_password, full_name, role, status, is_active, is_verified)
-                VALUES (?, ?, ?, ?, 'author', 'pending_verification', 1, 0)
+                VALUES (?, ?, ?, ?, 'author', ?, 1, 0)
                 """,
-                (user_id, request.email, hash_password(request.password), request.full_name)
+                (
+                    user_id,
+                    request.email,
+                    hash_password(request.password),
+                    request.full_name,
+                    'active' if demo_active else 'pending_verification'
+                )
             )
+
+        if demo_active:
+            # DEMO MODE: OTP bypassed for testing, explicitly recorded as unverified
+            record_audit_log(
+                conn,
+                action="user_registered_demo_mode",
+                actor_email=request.email,
+                target_user_id=user_id,
+                details={"email": request.email, "role": "author", "demo_mode": True},
+                ip_address=client_ip
+            )
+            return {
+                "success": True,
+                "demo_mode": True,
+                "requires_otp": False,
+                "is_verified": False,
+                "email": request.email,
+                "message": f"DEMO Mode active: Account created for {request.email}. Email is unverified (OTP bypassed for testing). You can now sign in directly with your password."
+            }
 
         # 2. Issue OTP challenge
         try:
@@ -302,6 +386,9 @@ def register_user(request: UserRegisterRequest, req: Request):
 
     return {
         "success": True,
+        "requires_otp": True,
+        "demo_mode": False,
+        "is_verified": False,
         "message": f"Verification code sent to {mask_email(request.email)}. Please enter the 6-digit code to activate your account.",
         "email": request.email,
         "cooldown_seconds": 60
@@ -403,13 +490,15 @@ def resend_email_otp(request: ResendEmailOtpRequest):
 @router.post("/login")
 def login_user(request: UserLoginRequest, req: Request):
     """
-    Step 1 of Authentication:
-    - Verifies password against hashed credentials.
-    - Checks active and verified status.
-    - If valid, generates a single-use login challenge and sends OTP to registered email.
-    - Returns challenge_id for the subsequent OTP verification step.
+    User Sign In (Requirement 17):
+    - Code is required only during sign up.
+    - During sign in, only the correct password is required.
+    - Verifies PBKDF2-HMAC-SHA256 hashed password.
+    - Enforces account active and verified status (in DEMO mode, permits unverified testing accounts).
+    - Returns JWT access_token directly with requires_otp: False.
     """
     client_ip = req.client.host if req.client else None
+    demo_active = is_demo_auth_mode()
 
     with get_db() as conn:
         user_row = conn.execute("SELECT * FROM users WHERE email = ?", (request.email,)).fetchone()
@@ -441,51 +530,45 @@ def login_user(request: UserLoginRequest, req: Request):
             )
             raise HTTPException(status_code=401, detail="Invalid email or password.")
 
-        # Check unverified account
+        # Check unverified account in production mode
         is_verified = user_row["is_verified"] if "is_verified" in user_row.keys() else 1
-        if is_verified == 0 or status_val == "pending_verification":
+        if not demo_active and (is_verified == 0 or status_val == "pending_verification"):
             raise HTTPException(
                 status_code=403,
-                detail="Your email address has not been verified yet. Please verify your email before signing in."
+                detail="Your email address has not been verified yet. Please enter the verification code sent to your email during registration, or request a new code."
             )
 
-        # Credentials valid: Generate single-use login OTP challenge
-        try:
-            raw_otp, challenge_id = issue_otp_challenge(
-                conn, email=request.email, purpose="login_2fa", user_id=user_row["id"]
-            )
-        except OTPCooldownError as ce:
-            raise HTTPException(status_code=429, detail=str(ce))
-
-        # Send login OTP email
-        email_sent = send_login_otp_email(request.email, user_row["full_name"], raw_otp)
-        if not email_sent:
-            conn.rollback()
-            err_detail = get_last_delivery_error() or (
-                "Unable to send login verification code via email service. Please check RESEND_API_KEY and EMAIL_FROM configuration or try again."
-            )
-            raise HTTPException(
-                status_code=502,
-                detail=err_detail
-            )
+        # Credentials valid: issue JWT access token directly
+        token = create_access_token(
+            user_row["id"],
+            user_row["email"],
+            user_row["role"],
+            user_row["full_name"]
+        )
 
         record_audit_log(
             conn,
-            action="login_otp_sent",
+            action="login_success",
             actor_email=request.email,
             target_user_id=user_row["id"],
-            details={"challenge_id": challenge_id},
+            details={"auth_method": "password", "demo_mode": demo_active},
             ip_address=client_ip
         )
 
     return {
         "success": True,
-        "requires_otp": True,
-        "challenge_id": challenge_id,
-        "email": request.email,
-        "masked_email": mask_email(request.email),
-        "message": f"A 6-digit login verification code was sent to {mask_email(request.email)}.",
-        "cooldown_seconds": 60
+        "access_token": token,
+        "token_type": "bearer",
+        "requires_otp": False,
+        "user": {
+            "id": user_row["id"],
+            "email": user_row["email"],
+            "full_name": user_row["full_name"],
+            "role": user_row["role"],
+            "status": status_val,
+            "is_verified": is_verified,
+            "demo_mode": demo_active
+        }
     }
 
 
@@ -615,14 +698,32 @@ def get_current_user_profile(user: Dict[str, Any] = Depends(require_authenticate
 # 3. FORGOT PASSWORD & PASSWORD RESET (Requirement 6)
 # ============================================================
 
+@router.get("/mode")
+def get_auth_mode():
+    """
+    Returns the server-side authentication mode status.
+    - demo_mode: true if DEMO_AUTH_MODE=true is enabled.
+    - email_verification_required: true in production, false in demo mode.
+    """
+    demo_active = is_demo_auth_mode()
+    return {
+        "demo_mode": demo_active,
+        "email_verification_required": not demo_active,
+        "mode_label": "DEMO (Testing)" if demo_active else "Production (Institutional Email Verified)",
+        "allowed_domains": os.getenv("ALLOWED_EMAIL_DOMAINS", "*.svnit.ac.in, *.svnit.acm.org")
+    }
+
+
 @router.post("/forgot-password")
 def forgot_password(request: ForgotPasswordRequest, req: Request):
     """
     Initiates password recovery.
     Dispatches a time-limited OTP to the registered email address.
     Protects against account enumeration through uniform messaging.
+    In DEMO mode, bypasses email dispatch and allows demo code recovery.
     """
     client_ip = req.client.host if req.client else None
+    demo_active = is_demo_auth_mode()
 
     with get_db() as conn:
         user_row = conn.execute("SELECT id, full_name, is_active FROM users WHERE email = ?", (request.email,)).fetchone()
@@ -631,19 +732,27 @@ def forgot_password(request: ForgotPasswordRequest, req: Request):
                 raw_otp, challenge_id = issue_otp_challenge(
                     conn, email=request.email, purpose="password_reset", user_id=user_row["id"]
                 )
-                send_password_reset_otp_email(request.email, user_row["full_name"], raw_otp)
+                if not demo_active:
+                    send_password_reset_otp_email(request.email, user_row["full_name"], raw_otp)
                 record_audit_log(
                     conn, action="password_reset_requested", actor_email=request.email,
-                    target_user_id=user_row["id"], ip_address=client_ip
+                    target_user_id=user_row["id"], details={"demo_mode": demo_active}, ip_address=client_ip
                 )
             except OTPCooldownError as ce:
                 raise HTTPException(status_code=429, detail=str(ce))
             except Exception:
                 pass  # Avoid revealing delivery errors
 
+    msg = (
+        f"DEMO Mode active: Password recovery initiated for {request.email}. You can reset your password using code '000000'."
+        if demo_active
+        else f"If an eligible account is registered with {mask_email(request.email)}, a password reset code has been sent."
+    )
+
     return {
         "success": True,
-        "message": f"If an eligible account is registered with {mask_email(request.email)}, a password reset code has been sent.",
+        "demo_mode": demo_active,
+        "message": msg,
         "email": request.email,
         "cooldown_seconds": 60
     }
@@ -659,16 +768,24 @@ def reset_password(request: ResetPasswordRequest, req: Request):
     validate_password_policy(request.new_password)
 
     client_ip = req.client.host if req.client else None
+    demo_active = is_demo_auth_mode()
 
     with get_db() as conn:
-        try:
-            verified_email = verify_otp_challenge(
-                conn, email=request.email, purpose="password_reset", otp=request.otp
-            )
-        except OTPCooldownError as ce:
-            raise HTTPException(status_code=429, detail=str(ce))
-        except (OTPExpiredError, OTPAttemptsExceededError, OTPInvalidError) as oe:
-            raise HTTPException(status_code=400, detail=str(oe))
+        verified_email = None
+        if demo_active and request.otp == "000000":
+            user_row = conn.execute("SELECT id, email FROM users WHERE email = ?", (request.email,)).fetchone()
+            if not user_row:
+                raise HTTPException(status_code=404, detail="User account not found.")
+            verified_email = user_row["email"]
+        else:
+            try:
+                verified_email = verify_otp_challenge(
+                    conn, email=request.email, purpose="password_reset", otp=request.otp
+                )
+            except OTPCooldownError as ce:
+                raise HTTPException(status_code=429, detail=str(ce))
+            except (OTPExpiredError, OTPAttemptsExceededError, OTPInvalidError) as oe:
+                raise HTTPException(status_code=400, detail=str(oe))
 
         user_row = conn.execute("SELECT id FROM users WHERE email = ?", (verified_email,)).fetchone()
         if not user_row:
@@ -682,6 +799,7 @@ def reset_password(request: ResetPasswordRequest, req: Request):
             action="password_reset_completed",
             actor_email=verified_email,
             target_user_id=user_row["id"],
+            details={"demo_mode": demo_active},
             ip_address=client_ip
         )
 
