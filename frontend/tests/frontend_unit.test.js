@@ -1,6 +1,25 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { isApprovedInstitutionalEmail } from "../src/utils/institutionalEmail.js";
+import { AUTH_SESSION_PATH, postAuthSession } from "../src/services/authEndpoints.js";
+
+test("Firebase sign-in session request uses POST /api/auth/session", async () => {
+  const calls = [];
+  const fakeFetch = async (url, options) => {
+    calls.push({ url, options });
+    return { ok: true };
+  };
+
+  await postAuthSession(fakeFetch, `https://backend.example${AUTH_SESSION_PATH}`, {
+    Authorization: "Bearer test-token",
+  });
+
+  assert.equal(AUTH_SESSION_PATH, "/api/auth/session");
+  assert.deepEqual(calls, [{
+    url: "https://backend.example/api/auth/session",
+    options: { method: "POST", headers: { Authorization: "Bearer test-token" } },
+  }]);
+});
 
 // Helper replicating frontend field mapping for Executive Meet
 function mapExecFields(extractedFields = {}) {
@@ -389,5 +408,4 @@ test("OTP verification input strictly requires 6 numeric digits", () => {
   assert.equal(validateOtp("12a456"), false); // non-numeric
   assert.equal(validateOtp("849201"), true); // valid 6 digits
 });
-
 

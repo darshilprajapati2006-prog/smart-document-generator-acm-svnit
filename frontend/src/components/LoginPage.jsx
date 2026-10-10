@@ -6,7 +6,9 @@ import {
   registerUser,
   forgotPassword,
   validateInvitation,
+  apiUrl,
 } from "../services/documentApi";
+import { AUTH_SESSION_PATH, postAuthSession } from "../services/authEndpoints.js";
 import { isApprovedInstitutionalEmail } from "../utils/institutionalEmail";
 
 export default function LoginPage({ onLoginSuccess }) {
@@ -160,8 +162,8 @@ export default function LoginPage({ onLoginSuccess }) {
       await reload(firebaseAuth.currentUser);
       if (!firebaseAuth.currentUser.emailVerified) throw new Error("Open the verification link in your inbox, then try again.");
       const token = await firebaseAuth.currentUser.getIdToken(true);
-      const response = await fetch(`${import.meta.env.VITE_API_BASE_URL || "http://127.0.0.1:8000"}/api/auth/session`, {
-        method: "POST", headers: { Authorization: `Bearer ${token}` },
+      const response = await postAuthSession(fetch, apiUrl(AUTH_SESSION_PATH), {
+        Authorization: `Bearer ${token}`,
       });
       if (!response.ok) {
         const result = await response.json().catch(() => ({}));

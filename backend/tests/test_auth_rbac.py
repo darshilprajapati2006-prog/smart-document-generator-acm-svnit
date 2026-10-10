@@ -40,6 +40,12 @@ def firebase_headers(email, uid, verified=False):
     return {"Authorization": f"Bearer test-firebase:{uid}:{email}:{1 if verified else 0}"}
 
 
+def test_login_session_route_is_registered_at_expected_path():
+    paths = app.openapi()["paths"]
+    assert "post" in paths["/api/auth/session"]
+    assert "/api/auth/login" not in paths
+
+
 # ============================================================
 # 1. TWO-STEP LOGIN TESTS (All 6 Roles)
 # ============================================================

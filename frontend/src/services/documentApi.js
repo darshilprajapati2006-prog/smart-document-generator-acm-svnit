@@ -1,4 +1,5 @@
 import { firebaseAuth, authReady } from "./firebase";
+import { AUTH_SESSION_PATH, postAuthSession } from "./authEndpoints.js";
 import {
   createUserWithEmailAndPassword,
   updateProfile,
@@ -8,7 +9,18 @@ import {
   sendPasswordResetEmail,
   signOut,
 } from "firebase/auth";
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://127.0.0.1:8000";
+const configuredApiBase = (import.meta.env.VITE_API_BASE_URL || "")
+  .trim()
+  .replace(/\/+$/, "")
+  .replace(/\/api$/i, "");
+// Local Vite requests use its /api and /health proxy; production must provide
+// the deployed FastAPI base URL through VITE_API_BASE_URL.
+const API_BASE_URL = configuredApiBase || (import.meta.env.DEV ? "" : "http://127.0.0.1:8000");
+
+export function apiUrl(path) {
+  const normalizedPath = path.startsWith("/") ? path : `/${path}`;
+  return `${API_BASE_URL}${normalizedPath}`;
+}
 
 let authToken = "";
 if (typeof window !== "undefined") {
@@ -30,7 +42,7 @@ function getHeaders() {
 
 export async function checkBackendHealth() {
   try {
-    const res = await fetch(`${API_BASE_URL}/health`);
+    const res = await fetch(apiUrl("/health"));
     if (!res.ok) return false;
     const data = await res.json();
     return data.status === "healthy";
@@ -40,7 +52,7 @@ export async function checkBackendHealth() {
 }
 
 export async function fetchTemplates() {
-  const res = await fetch(`${API_BASE_URL}/api/documents/templates`, { headers: getHeaders() });
+  const res = await fetch(apiUrl("/api/documents/templates"), { headers: getHeaders() });
   if (!res.ok) throw new Error(`Failed to fetch templates: ${res.statusText}`);
   return res.json();
 }
@@ -282,8 +294,8 @@ export async function loginUser(email, password) {
   }
   const token = await credential.user.getIdToken(true);
   setAuthToken(token);
-  const res = await fetch(`${API_BASE_URL}/api/auth/session`, {
-    method: "POST", headers: { Authorization: `Bearer ${token}` },
+  const res = await postAuthSession(fetch, apiUrl(AUTH_SESSION_PATH), {
+    Authorization: `Bearer ${token}`,
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
@@ -325,7 +337,7 @@ export async function fetchCurrentUserProfile() {
   await user.reload();
   if (!user.emailVerified) return null;
   authToken = await user.getIdToken(true);
-  const res = await fetch(`${API_BASE_URL}/api/auth/session`, { method: "POST", headers: getHeaders() });
+  const res = await postAuthSession(fetch, apiUrl(AUTH_SESSION_PATH), getHeaders());
   if (!res.ok) {
     if (res.status === 401 || res.status === 403) {
       setAuthToken("");
