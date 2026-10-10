@@ -1,5 +1,5 @@
 import { firebaseAuth, authReady } from "./firebase";
-import { AUTH_SESSION_PATH, postAuthSession } from "./authEndpoints.js";
+import { AUTH_SESSION_PATH, postAuthSession, BOOTSTRAP_ADMIN_PATH, postBootstrapAdmin } from "./authEndpoints.js";
 import {
   createUserWithEmailAndPassword,
   updateProfile,
@@ -15,7 +15,7 @@ const configuredApiBase = (import.meta.env.VITE_API_BASE_URL || "")
   .replace(/\/api$/i, "");
 // Local Vite requests use its /api and /health proxy; production must provide
 // the deployed FastAPI base URL through VITE_API_BASE_URL.
-const API_BASE_URL = configuredApiBase || (import.meta.env.DEV ? "" : "http://127.0.0.1:8000");
+const API_BASE_URL = configuredApiBase || (import.meta.env.DEV ? "" : "https://smart-document-generator-backend.onrender.com");
 
 export function apiUrl(path) {
   const normalizedPath = path.startsWith("/") ? path : `/${path}`;
@@ -347,6 +347,34 @@ export async function completeVerifiedAccountSetup(fullName) {
   setAuthToken(token);
   const data = await session.json();
   return { access_token: token, user: data.user };
+}
+
+export async function bootstrapSystemAdmin() {
+  await authReady;
+  const user = firebaseAuth.currentUser;
+  if (!user) throw new Error("Sign in with your Firebase account before starting bootstrap.");
+  await reload(user);
+  if (!user.emailVerified) throw new Error("Verify your Firebase email before starting bootstrap.");
+
+  const idToken = await user.getIdToken(true);
+  const response = await postBootstrapAdmin(fetch, apiUrl(BOOTSTRAP_ADMIN_PATH), idToken);
+  if (!response.ok) {
+    const result = await response.json().catch(() => ({}));
+    throw new Error(result.detail || "System Admin bootstrap could not be completed.");
+  }
+  setAuthToken(idToken);
+  const result = await response.json();
+  const profileResponse = await fetch(apiUrl("/api/auth/me"), {
+    headers: { Authorization: `Bearer ${idToken}` },
+  });
+  if (!profileResponse.ok) {
+    throw new Error("Bootstrap was accepted, but profile verification could not be completed. Do not retry; check the authenticated profile endpoint.");
+  }
+  const profile = await profileResponse.json();
+  if (profile?.user?.role !== "admin") {
+    throw new Error("Bootstrap returned, but the authenticated profile does not show System Admin. Do not retry; contact the administrator.");
+  }
+  return { ...result, user: profile.user };
 }
 
 export async function registerUser({ role, full_name, email, password, confirm_password, invitation_token }) {

@@ -1,4 +1,5 @@
 import pytest
+import os
 from app.core import firebase_auth
 from app.core.security import decode_access_token
 
@@ -9,10 +10,28 @@ def _test_firebase_token(token):
         return {"uid": payload["sub"], "email": payload["email"], "email_verified": True}
     if isinstance(token, str) and token.startswith("test-firebase:"):
         _, uid, email, verified = token.split(":", 3)
-        return {"uid": uid, "email": email, "email_verified": verified == "1"}
+        project_id = os.getenv("FIREBASE_PROJECT_ID", "smartdocs-svnit-6904c")
+        return {
+            "uid": uid,
+            "sub": uid,
+            "email": email,
+            "email_verified": verified == "1",
+            "aud": project_id,
+            "iss": f"https://securetoken.google.com/{project_id}",
+        }
     raise ValueError("invalid test Firebase token")
 
 @pytest.fixture(autouse=True)
 def configure_test_firebase_environment(monkeypatch, request):
     """Replace Firebase's network-backed verifier with deterministic test token fixtures."""
     monkeypatch.setattr(firebase_auth, "verify_firebase_id_token", _test_firebase_token)
+
+
+@pytest.fixture(scope="session", autouse=True)
+def isolate_test_database(tmp_path_factory):
+    """Keep all test-side mutations, including bootstrap markers, out of app data."""
+    patch = pytest.MonkeyPatch()
+    path = tmp_path_factory.mktemp("smartdocs-tests") / "smartdocs-test.db"
+    patch.setenv("SMARTDOCS_DATABASE_PATH", str(path))
+    yield path
+    patch.undo()

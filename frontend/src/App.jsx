@@ -7,6 +7,7 @@ import TemplateEditorPanel from "./components/TemplateEditorPanel";
 import AnalyticsDashboard from "./components/AnalyticsDashboard";
 import ClausesModal from "./components/ClausesModal";
 import LoginPage from "./components/LoginPage";
+import AdminBootstrapPage from "./components/AdminBootstrapPage";
 import UserManagementModal from "./components/UserManagementModal";
 import RoleRequestModal from "./components/RoleRequestModal";
 import {
@@ -311,6 +312,7 @@ export default function App() {
     }
   });
   const [authChecking, setAuthChecking] = useState(true);
+  const [bootstrapMode, setBootstrapMode] = useState(() => new URLSearchParams(window.location.search).get("bootstrap-admin") === "1");
   const [showUserMgmt, setShowUserMgmt] = useState(false);
   const [showRoleRequest, setShowRoleRequest] = useState(false);
   const [recommendation, setRecommendation] = useState(null);
@@ -379,6 +381,19 @@ export default function App() {
     setCurrentUser(user);
     setCurrentRole(user.role);
     localStorage.setItem("acm_doc_user", JSON.stringify(user));
+  }
+
+  function handleBootstrapSuccess(user) {
+    setCurrentUser(user);
+    setCurrentRole(user.role);
+    localStorage.setItem("acm_doc_user", JSON.stringify(user));
+  }
+
+  function exitBootstrapMode() {
+    const cleanUrl = `${window.location.pathname}${window.location.hash}`;
+    window.history.replaceState(null, "", cleanUrl);
+    setBootstrapMode(false);
+    setActiveTab("create");
   }
 
   async function handleLogout() {
@@ -1059,6 +1074,16 @@ export default function App() {
 
   if (!currentUser) {
     return <LoginPage onLoginSuccess={handleLoginSuccess} />;
+  }
+
+  if (bootstrapMode) {
+    return (
+      <AdminBootstrapPage
+        user={currentUser}
+        onSuccess={handleBootstrapSuccess}
+        onContinue={exitBootstrapMode}
+      />
+    );
   }
 
   return (

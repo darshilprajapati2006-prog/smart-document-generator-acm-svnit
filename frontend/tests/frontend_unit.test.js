@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { isApprovedInstitutionalEmail } from "../src/utils/institutionalEmail.js";
-import { AUTH_SESSION_PATH, postAuthSession } from "../src/services/authEndpoints.js";
+import { AUTH_SESSION_PATH, postAuthSession, BOOTSTRAP_ADMIN_PATH, postBootstrapAdmin } from "../src/services/authEndpoints.js";
 
 test("Firebase sign-in session request uses POST /api/auth/session", async () => {
   const calls = [];
@@ -19,6 +19,20 @@ test("Firebase sign-in session request uses POST /api/auth/session", async () =>
     url: "https://backend.example/api/auth/session",
     options: { method: "POST", headers: { Authorization: "Bearer test-token" } },
   }]);
+});
+
+test("System Admin bootstrap sends a fresh Firebase bearer token on the actual request", async () => {
+  const calls = [];
+  const fakeFetch = async (url, options) => {
+    calls.push({ url, options });
+    return { ok: true };
+  };
+  await postBootstrapAdmin(fakeFetch, `https://backend.example${BOOTSTRAP_ADMIN_PATH}`, "test-id-token");
+  assert.deepEqual(calls, [{
+    url: "https://backend.example/api/auth/bootstrap-admin",
+    options: { method: "POST", headers: { Authorization: "Bearer test-id-token" } },
+  }]);
+  assert.equal(JSON.stringify(calls).includes("X-Bootstrap-Secret"), false);
 });
 
 // Helper replicating frontend field mapping for Executive Meet
@@ -408,4 +422,3 @@ test("OTP verification input strictly requires 6 numeric digits", () => {
   assert.equal(validateOtp("12a456"), false); // non-numeric
   assert.equal(validateOtp("849201"), true); // valid 6 digits
 });
-

@@ -12,6 +12,7 @@ Tests:
 9. Security Audit Logging.
 """
 import uuid
+import os
 from urllib.parse import urlparse, parse_qs
 import pytest
 from fastapi.testclient import TestClient
@@ -198,22 +199,109 @@ def test_authorized_admin_can_approve_role_request_with_audit_log():
     assert any(row["action"] == "role_request_reviewed" and row["target_user_id"] == uid for row in audit)
 
 
-def test_bootstrap_requires_verified_firebase_and_is_one_time(monkeypatch):
+def test_bootstrap_requires_verified_allowlisted_author_and_is_one_time(monkeypatch):
     from app.db.database import get_db
+    from secrets import token_urlsafe
+
     with get_db() as conn:
         conn.execute("DELETE FROM users WHERE role='admin'")
         conn.execute("DELETE FROM system_bootstrap")
-    monkeypatch.setenv("ADMIN_BOOTSTRAP_SECRET", "strong-one-time-bootstrap-secret")
+
     email = f"bootstrap_{uuid.uuid4().hex[:6]}@aid.svnit.ac.in"
-    missing_auth = client.post("/api/auth/bootstrap-admin", headers={"X-Bootstrap-Secret": "strong-one-time-bootstrap-secret"})
+    uid = f"bootstrap-uid-{uuid.uuid4().hex}"
+    monkeypatch.setenv("FIREBASE_PROJECT_ID", "smartdocs-svnit-6904c")
+    monkeypatch.setenv("ALLOWED_EMAIL_DOMAINS", "svnit.ac.in")
+    monkeypatch.setenv("ADMIN_BOOTSTRAP_SECRET", token_urlsafe(48))
+    monkeypatch.setenv("ADMIN_BOOTSTRAP_EMAIL", email)
+
+    with get_db() as conn:
+        conn.execute(
+            "INSERT INTO users (id,email,hashed_password,full_name,role,status,is_active,is_verified) VALUES (?,?,?,?,?,'active',1,1)",
+            ("bootstrap-author", email, "firebase-managed", "Bootstrap Author", "author"),
+        )
+
+    # Supplying the old secret header is not enough; the browser must send its Firebase identity.
+    missing_auth = client.post("/api/auth/bootstrap-admin")
     assert missing_auth.status_code == 401
-    unverified = client.post("/api/auth/bootstrap-admin", headers={
-        "X-Bootstrap-Secret": "strong-one-time-bootstrap-secret", **firebase_headers(email, "bootstrap-uid", False),
-    })
+
+    invalid_token = client.post("/api/auth/bootstrap-admin", headers={"Authorization": "Bearer invalid-token"})
+    assert invalid_token.status_code == 401
+
+    unverified = client.post("/api/auth/bootstrap-admin", headers=firebase_headers(email, uid, False))
     assert unverified.status_code == 403
-    headers = {"X-Bootstrap-Secret": "strong-one-time-bootstrap-secret", **firebase_headers(email, "bootstrap-uid", True)}
-    assert client.post("/api/auth/bootstrap-admin", headers=headers).status_code == 200
-    assert client.post("/api/auth/bootstrap-admin", headers=headers).status_code == 409
+
+    disallowed_email = "bootstrap@gmail.com"
+    disallowed = client.post("/api/auth/bootstrap-admin", headers=firebase_headers(disallowed_email, "other-uid", True))
+    assert disallowed.status_code == 403
+
+    wrong_allowlist = client.post("/api/auth/bootstrap-admin", headers=firebase_headers("other@aid.svnit.ac.in", "other-uid", True))
+    assert wrong_allowlist.status_code == 403
+
+    monkeypatch.setenv("ADMIN_BOOTSTRAP_SECRET", "too-short")
+    invalid_server_secret = client.post("/api/auth/bootstrap-admin", headers=firebase_headers(email, uid, True))
+    assert invalid_server_secret.status_code == 503
+
+    monkeypatch.setenv("ADMIN_BOOTSTRAP_SECRET", token_urlsafe(48))
+    configured_database_path = os.environ["SMARTDOCS_DATABASE_PATH"]
+    monkeypatch.delenv("SMARTDOCS_DATABASE_PATH")
+    missing_persistent_path = client.post("/api/auth/bootstrap-admin", headers=firebase_headers(email, uid, True))
+    assert missing_persistent_path.status_code == 503
+    monkeypatch.setenv("SMARTDOCS_DATABASE_PATH", configured_database_path)
+
+    success = client.post("/api/auth/bootstrap-admin", headers=firebase_headers(email, uid, True))
+    assert success.status_code == 200
+    assert success.json()["user"]["id"] == "bootstrap-author"
+    assert success.json()["user"]["role"] == "admin"
+
+    with get_db() as conn:
+        row = conn.execute("SELECT role, firebase_uid, email, is_verified FROM users WHERE id='bootstrap-author'").fetchone()
+        marker = conn.execute("SELECT admin_user_id, admin_firebase_uid FROM system_bootstrap WHERE id=1").fetchone()
+        audit = conn.execute("SELECT action FROM audit_logs WHERE action='admin_bootstrapped'").fetchone()
+    assert row["role"] == "admin"
+    assert row["firebase_uid"] == uid
+    assert row["email"] == email
+    assert row["is_verified"] == 1
+    assert marker["admin_user_id"] == "bootstrap-author"
+    assert marker["admin_firebase_uid"] == uid
+    assert audit is not None
+
+    profile = client.get("/api/auth/me", headers=firebase_headers(email, uid, True))
+    assert profile.status_code == 200
+    assert profile.json()["user"]["role"] == "admin"
+
+    already_done = client.post("/api/auth/bootstrap-admin", headers=firebase_headers(email, uid, True))
+    assert already_done.status_code == 409
+
+
+def test_bootstrap_rejects_token_from_another_firebase_project(monkeypatch):
+    from app.core import firebase_auth
+    from secrets import token_urlsafe
+
+    monkeypatch.setenv("FIREBASE_PROJECT_ID", "smartdocs-svnit-6904c")
+    monkeypatch.setenv("ALLOWED_EMAIL_DOMAINS", "svnit.ac.in")
+    monkeypatch.setenv("ADMIN_BOOTSTRAP_SECRET", token_urlsafe(48))
+    monkeypatch.setenv("ADMIN_BOOTSTRAP_EMAIL", "bootstrap@aid.svnit.ac.in")
+    monkeypatch.setattr(firebase_auth, "verify_firebase_id_token", lambda _token: {
+        "uid": "foreign-uid",
+        "sub": "foreign-uid",
+        "email": "bootstrap@aid.svnit.ac.in",
+        "email_verified": True,
+        "aud": "some-other-project",
+        "iss": "https://securetoken.google.com/some-other-project",
+    })
+    response = client.post("/api/auth/bootstrap-admin", headers={"Authorization": "Bearer validly-signed-wrong-project-token"})
+    assert response.status_code == 401
+
+
+def test_vercel_production_origin_is_allowed_for_authorized_bootstrap_request():
+    response = client.options("/api/auth/bootstrap-admin", headers={
+        "Origin": "https://smart-document-generator-acm-svnit.vercel.app",
+        "Access-Control-Request-Method": "POST",
+        "Access-Control-Request-Headers": "authorization",
+    })
+    assert response.status_code == 200
+    assert response.headers["access-control-allow-origin"] == "https://smart-document-generator-acm-svnit.vercel.app"
+    assert "authorization" in response.headers["access-control-allow-headers"].lower()
 
 def test_public_registration_rejects_privileged_role_and_noninstitutional_domain():
     base = {

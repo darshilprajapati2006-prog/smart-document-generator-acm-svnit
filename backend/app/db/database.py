@@ -1,18 +1,17 @@
-"""
-Database initialization and connection management using SQLite.
-Survives application restarts and stores users, documents, versions, approvals, clauses, templates, and analytics.
-"""
+"""SQLite connection management. Persistence depends on the configured filesystem volume."""
 import sqlite3
 import os
 from pathlib import Path
 from contextlib import contextmanager
 
 DB_DIR = Path(__file__).resolve().parent.parent.parent / "data"
-DB_PATH = DB_DIR / "smart_doc_generator.db"
+DEFAULT_DB_PATH = DB_DIR / "smart_doc_generator.db"
 
 def get_db_path() -> Path:
-    DB_DIR.mkdir(parents=True, exist_ok=True)
-    return DB_PATH
+    configured_path = os.getenv("SMARTDOCS_DATABASE_PATH", "").strip()
+    db_path = Path(configured_path).expanduser() if configured_path else DEFAULT_DB_PATH
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    return db_path
 
 @contextmanager
 def get_db():

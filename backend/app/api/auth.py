@@ -382,11 +382,13 @@ def get_current_user_profile(user: Dict[str, Any] = Depends(require_authenticate
 # ============================================================
 
 @router.post("/bootstrap-admin")
-def bootstrap_admin(authorization: Optional[str] = Header(None), x_bootstrap_secret: Optional[str] = Header(None)):
-    """One-time bootstrap requires both a verified Firebase identity and backend-only secret."""
-    configured_secret = os.environ.get("ADMIN_BOOTSTRAP_SECRET")
-    if not configured_secret or not x_bootstrap_secret or not secrets.compare_digest(x_bootstrap_secret, configured_secret):
-        raise HTTPException(status_code=403, detail="Valid server bootstrap secret required.")
+def bootstrap_admin(authorization: Optional[str] = Header(None)):
+    """Promotes only the configured, verified Author account during one-time bootstrap.
+
+    ADMIN_BOOTSTRAP_SECRET is a backend-only enablement secret; it is never
+    accepted from or sent by the browser. ADMIN_BOOTSTRAP_EMAIL scopes the
+    otherwise one-time operation to the intended account.
+    """
     if not authorization or not authorization.lower().startswith("bearer "):
         raise HTTPException(status_code=401, detail="Verified Firebase identity required.")
     from app.core.firebase_auth import verify_firebase_id_token
@@ -396,39 +398,58 @@ def bootstrap_admin(authorization: Optional[str] = Header(None), x_bootstrap_sec
         raise HTTPException(status_code=401, detail="Invalid Firebase session.")
     email = str(claims.get("email", "")).strip().lower()
     uid = str(claims.get("uid", ""))
-    if not uid or not claims.get("email_verified") or not email or not is_approved_institutional_email(email):
+    project_id = os.getenv("FIREBASE_PROJECT_ID", "smartdocs-svnit-6904c").strip()
+    expected_issuer = f"https://securetoken.google.com/{project_id}"
+    if (
+        not uid
+        or not claims.get("sub")
+        or claims.get("sub") != uid
+        or claims.get("aud") != project_id
+        or claims.get("iss") != expected_issuer
+    ):
+        raise HTTPException(status_code=401, detail="Firebase token is invalid for this project.")
+    if claims.get("email_verified") is not True or not email:
         raise HTTPException(status_code=403, detail="Use a verified institutional Firebase account to bootstrap.")
+    if not is_approved_institutional_email(email):
+        raise HTTPException(status_code=403, detail="This email domain is not approved for System Admin bootstrap.")
+
+    configured_secret = os.environ.get("ADMIN_BOOTSTRAP_SECRET", "").strip()
+    if len(configured_secret) < 32 or configured_secret.lower().startswith("replace-with-"):
+        raise HTTPException(status_code=503, detail="System Admin bootstrap is not configured on the server.")
+    database_path = os.environ.get("SMARTDOCS_DATABASE_PATH", "").strip()
+    if not database_path:
+        raise HTTPException(status_code=503, detail="System Admin bootstrap requires an explicitly configured persistent database path.")
+    bootstrap_email = os.environ.get("ADMIN_BOOTSTRAP_EMAIL", "").strip().lower()
+    if not bootstrap_email:
+        raise HTTPException(status_code=503, detail="System Admin bootstrap is not configured on the server.")
+    if not is_approved_institutional_email(bootstrap_email):
+        raise HTTPException(status_code=503, detail="System Admin bootstrap is not configured on the server.")
+    if not secrets.compare_digest(email, bootstrap_email):
+        raise HTTPException(status_code=403, detail="This Firebase account is not authorized for initial System Admin setup.")
 
     with get_db() as conn:
         conn.execute("BEGIN IMMEDIATE")
         if conn.execute("SELECT id FROM system_bootstrap WHERE id = 1").fetchone() or conn.execute("SELECT id FROM users WHERE role='admin' AND is_active=1").fetchone():
             raise HTTPException(status_code=409, detail="System Admin bootstrap has already been completed.")
         existing_user = conn.execute("SELECT * FROM users WHERE email = ?", (email,)).fetchone()
-        if existing_user:
-            if existing_user["firebase_uid"] and existing_user["firebase_uid"] != uid:
-                raise HTTPException(status_code=409, detail="This email is linked to another Firebase account.")
-            conn.execute(
-                """
-                UPDATE users
-                SET role = 'admin', firebase_uid = ?, status = 'active', is_active = 1, is_verified = 1
-                WHERE email = ?
-                """,
-                (uid, email)
-            )
-            user_id = existing_user["id"]
-        else:
-            user_id = uid
-            conn.execute(
-                """
-                INSERT INTO users (id, email, hashed_password, full_name, role, status, is_active, is_verified, firebase_uid)
-                VALUES (?, ?, 'firebase-managed', ?, 'admin', 'active', 1, 1, ?)
-                """,
-                (user_id, email, str(claims.get("name") or email.split("@")[0]), uid)
-            )
+        if not existing_user:
+            raise HTTPException(status_code=403, detail="Sign in with your existing active Author profile before bootstrap.")
+        if existing_user["role"] != "author" or existing_user["status"] != "active" or existing_user["is_active"] != 1 or existing_user["is_verified"] != 1:
+            raise HTTPException(status_code=403, detail="Bootstrap requires your active, verified Author profile.")
+        if existing_user["firebase_uid"] and existing_user["firebase_uid"] != uid:
+            raise HTTPException(status_code=409, detail="This email is linked to another Firebase account.")
+
+        updated = conn.execute(
+            "UPDATE users SET role = 'admin', firebase_uid = ?, status = 'active', is_active = 1, is_verified = 1 WHERE id = ? AND role = 'author'",
+            (uid, existing_user["id"]),
+        )
+        if updated.rowcount != 1:
+            raise HTTPException(status_code=409, detail="The Author profile changed; retry after reviewing the account.")
+        user_id = existing_user["id"]
 
         record_audit_log(
             conn, action="admin_bootstrapped", actor_id=uid, actor_email=email, target_user_id=user_id,
-            details={"email": email, "promoted": bool(existing_user)}
+            details={"email": email, "promoted": True}
         )
         conn.execute("INSERT INTO system_bootstrap (id, completed_at, admin_user_id, admin_firebase_uid) VALUES (1, ?, ?, ?)", (datetime.now(timezone.utc).isoformat(), user_id, uid))
 
@@ -438,7 +459,7 @@ def bootstrap_admin(authorization: Optional[str] = Header(None), x_bootstrap_sec
         "user": {
             "id": user_id,
             "email": email,
-            "full_name": str(claims.get("name") or email.split("@")[0]),
+            "full_name": existing_user["full_name"],
             "role": "admin"
         }
     }
