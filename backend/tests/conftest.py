@@ -1,5 +1,6 @@
 import os
 import pytest
+from app.services import email_service
 
 @pytest.fixture(autouse=True)
 def configure_test_email_environment(monkeypatch, request):
@@ -11,3 +12,6 @@ def configure_test_email_environment(monkeypatch, request):
     """
     if "test_email_service" not in getattr(request.module, "__name__", ""):
         monkeypatch.setenv("RESEND_API_KEY", "")
+        monkeypatch.setattr(email_service, "send_signup_otp_email", lambda *args, **kwargs: True)
+        monkeypatch.setattr(email_service, "send_password_reset_otp_email", lambda *args, **kwargs: True)
+        monkeypatch.setattr(email_service, "send_login_otp_email", lambda *args, **kwargs: True)

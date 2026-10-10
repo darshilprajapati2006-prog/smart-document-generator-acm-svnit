@@ -22,6 +22,7 @@ export default function LoginPage({ onLoginSuccess }) {
 
   // Sign Up State
   const [fullName, setFullName] = useState("");
+  const [registerRole, setRegisterRole] = useState("author");
   const [registerEmail, setRegisterEmail] = useState("");
   const [registerPassword, setRegisterPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
@@ -179,24 +180,21 @@ export default function LoginPage({ onLoginSuccess }) {
     setLoading(true);
     try {
       const data = await registerUser({
+        role: registerRole,
         full_name: fullName.trim(),
         email: registerEmail.trim(),
         password: registerPassword,
         confirm_password: confirmPassword,
       });
 
-      if (data && (data.requires_otp === false || data.demo_mode)) {
-        // DEMO mode: Account created directly without email OTP
-        setSuccessMessage(data.message || "Account created! (DEMO Mode: Email Unverified). Please sign in with your password.");
-        setLoginEmail(registerEmail.trim());
-        setLoginPassword("");
-        setView("signin");
-      } else {
+      if (data && data.requires_otp) {
         // Production: OTP verification required
         setActiveEmail(registerEmail.trim());
         setResendCooldown(data.cooldown_seconds || 60);
         setSuccessMessage(data.message || "Verification code sent to your email.");
         setView("verify_email");
+      } else {
+        setErrorMessage("We couldn't start registration. Please try again.");
       }
     } catch (err) {
       setErrorMessage(err.message || "Registration failed. Please check your details.");
@@ -602,6 +600,17 @@ export default function LoginPage({ onLoginSuccess }) {
         {view === "signup" && (
           <form onSubmit={handleRegisterSubmit} style={{ padding: "12px 32px 28px" }}>
             <div style={{ marginBottom: "16px" }}>
+              <label htmlFor="reg-role" style={{ display: "block", marginBottom: "6px", color: "#cbd5e1", fontSize: "0.82rem", fontWeight: 600 }}>Role</label>
+              <select id="reg-role" value={registerRole} onChange={(e) => setRegisterRole(e.target.value)} required style={{ width: "100%", padding: "11px 14px", borderRadius: "8px", border: "1px solid rgba(255,255,255,.15)", background: "#0f172a", color: "#fff", fontSize: ".9rem" }}>
+                <option value="author">Author</option>
+                <option value="reviewer" disabled>Reviewer — administrator approval required</option>
+                <option value="approver" disabled>Approver — administrator approval required</option>
+                <option value="template_admin" disabled>Template Admin — administrator approval required</option>
+                <option value="admin" disabled>System Admin — administrator approval required</option>
+                <option value="viewer" disabled>Viewer — administrator approval required</option>
+              </select>
+            </div>
+            <div style={{ marginBottom: "16px" }}>
               <label
                 htmlFor="reg-name"
                 style={{
@@ -667,16 +676,6 @@ export default function LoginPage({ onLoginSuccess }) {
                   boxSizing: "border-box",
                 }}
               />
-              <div
-                style={{
-                  marginTop: "6px",
-                  fontSize: "0.76rem",
-                  color: "#94a3b8",
-                  lineHeight: 1.35,
-                }}
-              >
-                💡 Institutional SVNIT emails (e.g. <b>@svnit.ac.in</b>, <b>@aid.svnit.ac.in</b>) and test emails are supported. In Resend Sandbox mode, use your account email or enable DEMO mode on Render.
-              </div>
             </div>
 
             <div style={{ marginBottom: "16px" }}>

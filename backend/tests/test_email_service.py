@@ -85,7 +85,7 @@ def test_resend_api_rejection_returns_false_without_fake_success(monkeypatch):
 
         latest = LAST_SENT_EMAILS[-1]
         assert latest["live_delivery"] is False
-        assert "Domain not verified" in latest["delivery_error"]
+        assert latest.get("otp_code") is None
 
 
 def test_resend_network_exception_handling(monkeypatch):
@@ -100,11 +100,11 @@ def test_resend_network_exception_handling(monkeypatch):
         )
         assert success is False
         latest = LAST_SENT_EMAILS[-1]
-        assert "timed out" in latest["delivery_error"].lower()
+        assert latest.get("otp_code") is None
 
 
-def test_unconfigured_resend_fallback(monkeypatch):
-    """Verify unconfigured local dev mode safely captures emails without crashing."""
+def test_unconfigured_resend_fails_closed(monkeypatch):
+    """Missing provider configuration never pretends delivery succeeded."""
     monkeypatch.delenv("RESEND_API_KEY", raising=False)
 
     success = send_email(
@@ -115,7 +115,5 @@ def test_unconfigured_resend_fallback(monkeypatch):
         purpose="signup_verification",
         otp_code="654321"
     )
-    assert success is True
-    latest = LAST_SENT_EMAILS[-1]
-    assert latest["live_delivery"] is False
-    assert latest["otp_code"] == "654321"
+    assert success is False
+    assert LAST_SENT_EMAILS == [] or LAST_SENT_EMAILS[-1].get("otp_code") is None

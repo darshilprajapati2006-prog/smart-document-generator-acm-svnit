@@ -1201,7 +1201,7 @@ export default function App() {
               >
                 {roleDisplayNames[currentRole] || currentRole}
               </span>
-              {(currentUser.demo_mode || currentUser.is_verified === 0) && (
+              {currentUser.is_verified === 0 && (
                 <span
                   style={{
                     fontSize: "0.68rem",
@@ -1212,9 +1212,9 @@ export default function App() {
                     color: "#b45309",
                     border: "1px solid #fde68a",
                   }}
-                  title="DEMO Mode: Account created without email OTP. Email is unverified."
+                  title="Email verification required"
                 >
-                  ⚠️ Unverified (DEMO)
+                  ⚠️ Unverified
                 </span>
               )}
             </div>

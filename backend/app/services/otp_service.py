@@ -18,7 +18,7 @@ from typing import Tuple, Optional
 import sqlite3
 
 OTP_SECRET_KEY = os.getenv("OTP_SECRET_KEY") or os.getenv("JWT_SECRET_KEY") or "acm_svnit_smart_docs_otp_secret_key_2026"
-DEFAULT_EXPIRY_MINUTES = 10
+DEFAULT_EXPIRY_MINUTES = 5
 RESEND_COOLDOWN_SECONDS = 60
 MAX_ATTEMPTS = 5
 

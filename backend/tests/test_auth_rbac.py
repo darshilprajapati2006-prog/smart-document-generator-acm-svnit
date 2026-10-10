@@ -18,6 +18,7 @@ from app.main import app
 from app.db.seed import seed_database
 from app.core.security import decode_access_token
 from app.services.email_service import get_latest_sent_otp
+from app.services.otp_service import issue_otp_challenge
 
 client = TestClient(app)
 
@@ -121,6 +122,11 @@ def test_signup_registration_and_email_verification():
     assert reg_res.status_code == 200
     assert reg_res.json()["success"] is True
 
+    # OTP is stored hashed; tests issue the real challenge directly rather than retaining plaintext in mail logs.
+    from app.db.database import get_db
+    with get_db() as conn:
+        otp, _ = issue_otp_challenge(conn, email=email, purpose="signup_verification")
+
     # 2. Login before verification must be rejected
     unverified_login = client.post("/api/auth/login", json={"email": email, "password": password})
     assert unverified_login.status_code == 403
@@ -131,8 +137,6 @@ def test_signup_registration_and_email_verification():
     assert bad_otp_res.status_code == 400
 
     # 4. Verify with correct OTP -> activates account
-    otp = get_latest_sent_otp(email, "signup_verification")
-    assert otp is not None
     verify_res = client.post("/api/auth/verify-email-otp", json={"email": email, "otp": otp})
     assert verify_res.status_code == 200
     assert verify_res.json()["success"] is True
@@ -175,6 +179,19 @@ def test_signup_validation_and_duplicate_rejection():
     assert "already exists" in res_dup.json()["detail"].lower()
 
 
+def test_public_registration_rejects_privileged_role_and_noninstitutional_domain():
+    base = {
+        "full_name": "Role Check",
+        "email": f"rolecheck_{uuid.uuid4().hex[:6]}@svnit.ac.in",
+        "password": "StrongPassword@2026",
+        "confirm_password": "StrongPassword@2026",
+    }
+    escalation = client.post("/api/auth/register", json={**base, "role": "admin"})
+    assert escalation.status_code == 422
+    external = client.post("/api/auth/register", json={**base, "email": "student@example.com"})
+    assert external.status_code == 422
+
+
 def test_otp_resend_cooldown():
     """Verify OTP resend is rate-limited by a 60-second cooldown."""
     email = f"cooldown_{uuid.uuid4().hex[:6]}@svnit.acm.org"
@@ -208,15 +225,18 @@ def test_forgot_password_and_reset_flow():
         "password": initial_pwd,
         "confirm_password": initial_pwd
     })
-    signup_otp = get_latest_sent_otp(email, "signup_verification")
+    from app.db.database import get_db
+    with get_db() as conn:
+        signup_otp, _ = issue_otp_challenge(conn, email=email, purpose="signup_verification")
     client.post("/api/auth/verify-email-otp", json={"email": email, "otp": signup_otp})
 
     # 1. Request recovery code
     req_res = client.post("/api/auth/forgot-password", json={"email": email})
     assert req_res.status_code == 200
 
-    reset_otp = get_latest_sent_otp(email, "password_reset")
-    assert reset_otp is not None
+    from app.db.database import get_db
+    with get_db() as conn:
+        reset_otp, _ = issue_otp_challenge(conn, email=email, purpose="password_reset")
 
     # 2. Reset password with valid OTP and new password
     reset_res = client.post("/api/auth/reset-password", json={
@@ -362,51 +382,39 @@ def test_demo_auth_mode_lifecycle(monkeypatch):
     email = f"demo_user_{uuid.uuid4().hex[:6]}@aid.svnit.ac.in"
     pwd = "DemoPassword@123"
 
-    # 1. Mode endpoint reports demo mode
+    # 1. Legacy mode endpoint continues to require verification
     mode_res = client.get("/api/auth/mode")
     assert mode_res.status_code == 200
     assert mode_res.json()["demo_mode"] is True
     assert mode_res.json()["email_verification_required"] is False
 
-    # 2. Register in DEMO mode -> no OTP required, clearly marked unverified
+    # 2. Registration requires OTP even when a legacy bypass flag is set
     reg = client.post("/api/auth/register", json={
+        "role": "author",
         "full_name": "Demo Student",
         "email": email,
         "password": pwd,
         "confirm_password": pwd
     })
     assert reg.status_code == 200
-    assert reg.json()["demo_mode"] is True
-    assert reg.json()["requires_otp"] is False
+    assert reg.json()["requires_otp"] is True
     assert reg.json()["is_verified"] is False
 
-    # 3. Direct Login with password succeeds without OTP
+    # Unverified accounts cannot log in even when a legacy demo flag is set.
     login = client.post("/api/auth/login", json={"email": email, "password": pwd})
-    assert login.status_code == 200
-    assert login.json()["access_token"] is not None
-    assert login.json()["requires_otp"] is False
-    assert login.json()["user"]["is_verified"] == 0
-    assert login.json()["user"]["demo_mode"] is True
+    assert login.status_code == 403
 
-    # 4. Forgot password in demo mode
+    # 4. Forgot password
     forgot = client.post("/api/auth/forgot-password", json={"email": email})
     assert forgot.status_code == 200
-    assert forgot.json()["demo_mode"] is True
-
-    # 5. Reset password using demo code '000000'
-    new_pwd = "NewDemoPass@456"
+    assert "demo_mode" not in forgot.json()
     reset = client.post("/api/auth/reset-password", json={
         "email": email,
         "otp": "000000",
-        "new_password": new_pwd,
-        "confirm_password": new_pwd
+        "new_password": "NewDemoPass@456",
+        "confirm_password": "NewDemoPass@456"
     })
-    assert reset.status_code == 200
-
-    # 6. Login with new password
-    new_login = client.post("/api/auth/login", json={"email": email, "password": new_pwd})
-    assert new_login.status_code == 200
-    assert new_login.json()["access_token"] is not None
+    assert reset.status_code == 400
 
 
 def test_approved_institutional_email_domains(monkeypatch):
@@ -440,4 +448,3 @@ def test_approved_institutional_email_domains(monkeypatch):
         "confirm_password": "Password@123"
     })
     assert unapproved.status_code == 422 or unapproved.status_code == 400
-

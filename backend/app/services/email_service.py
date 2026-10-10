@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 
 RESEND_API_URL = "https://api.resend.com/emails"
 
-# Test & Debug in-memory message log (stores delivery records for test assertions)
+# Test-only delivery metadata. Never retain OTP values.
 LAST_SENT_EMAILS: List[Dict[str, Any]] = []
 _LAST_DELIVERY_ERROR: Optional[str] = None
 
@@ -35,10 +35,10 @@ def get_email_config() -> Dict[str, Any]:
         os.getenv("EMAIL_FROM", "").strip()
         or os.getenv("RESEND_FROM_EMAIL", "").strip()
         or os.getenv("SMTP_FROM_EMAIL", "").strip()
-        or "onboarding@resend.dev"
+        or ""
     )
 
-    # Format 'from' field properly: e.g. 'SmartDocs SVNIT <onboarding@resend.dev>'
+    # Format 'from' field properly when an explicit verified sender is configured.
     if "<" not in from_raw and "@" in from_raw:
         from_name = os.getenv("EMAIL_FROM_NAME", "SmartDocs SVNIT · ACM Chapter").strip()
         from_address = f"{from_name} <{from_raw}>"
@@ -56,7 +56,7 @@ def format_otp_html(
     recipient_name: str,
     otp: str,
     purpose_desc: str,
-    expires_minutes: int = 10
+    expires_minutes: int = 5
 ) -> str:
     """Generates an HTML email with SmartDocs SVNIT branding."""
     return f"""<!DOCTYPE html>
@@ -185,7 +185,7 @@ def send_email(
 ) -> bool:
     """
     Sends an email using the Resend HTTPS API (POST https://api.resend.com/emails).
-    If RESEND_API_KEY is not configured, safely records in memory and logs to console for local dev/testing.
+    Missing provider configuration fails closed; delivery is never simulated.
     Returns True if successfully dispatched; False on transmission failure.
     """
     cfg = get_email_config()
@@ -193,13 +193,14 @@ def send_email(
         "to_email": to_email,
         "subject": subject,
         "purpose": purpose,
-        "otp_code": otp_code,
+        "otp_code": None,
         "sent_at": datetime.now(timezone.utc).isoformat(),
         "live_delivery": False
     }
 
     # If Resend API Key is configured, execute HTTPS request
     if cfg["api_key"]:
+        global _LAST_DELIVERY_ERROR
         payload = {
             "from": cfg["from_address"],
             "to": [to_email],
@@ -220,7 +221,6 @@ def send_email(
                 )
 
             if res.status_code in (200, 201):
-                global _LAST_DELIVERY_ERROR
                 _LAST_DELIVERY_ERROR = None
                 res_data = res.json()
                 record["live_delivery"] = True
@@ -232,64 +232,28 @@ def send_email(
                 )
                 return True
             else:
-                try:
-                    err_json = res.json()
-                    err_msg = err_json.get("message", res.text)
-                except Exception:
-                    err_msg = res.text
-                
-                logger.error(
-                    "Resend API error (%s) when sending to %s: %s",
-                    res.status_code, to_email, err_msg
-                )
-                record["delivery_error"] = f"Resend HTTP {res.status_code}: {err_msg}"
+                logger.error("Resend API rejected email delivery (HTTP %s)", res.status_code)
                 LAST_SENT_EMAILS.append(record)
-
-                if res.status_code == 403 and "only send testing emails" in err_msg.lower():
-                    _LAST_DELIVERY_ERROR = (
-                        "Resend Sandbox mode: onboarding@resend.dev can only deliver to your verified Resend account email (darshilprajapati2006@gmail.com). "
-                        "To test right now, please register using darshilprajapati2006@gmail.com, or verify a custom domain at resend.com/domains."
-                    )
-                    # Print helper in local server console so developer can see
-                    print("\n" + "=" * 58, flush=True)
-                    print("⚠️  [RESEND SANDBOX RESTRICTION]", flush=True)
-                    print(f"To:      {to_email}", flush=True)
-                    print(f"Notice:  {_LAST_DELIVERY_ERROR}", flush=True)
-                    if otp_code:
-                        print(f"🔑 Local Dev OTP Code: {otp_code}", flush=True)
-                    print("=" * 58 + "\n", flush=True)
-                else:
-                    _LAST_DELIVERY_ERROR = f"Email delivery failed (Resend HTTP {res.status_code}): {err_msg}"
+                _LAST_DELIVERY_ERROR = "Email delivery was rejected by the provider."
 
                 return False
 
         except Exception as exc:
-            logger.error("Resend connection error when sending to %s: %s", to_email, str(exc))
-            _LAST_DELIVERY_ERROR = f"Email service connection error: {str(exc)}"
-            record["delivery_error"] = str(exc)
+            logger.error("Email provider connection failed.")
+            _LAST_DELIVERY_ERROR = "Email provider connection failed."
             LAST_SENT_EMAILS.append(record)
             return False
 
     else:
-        # Development / test mode: safe simulated delivery with terminal console banner
-        logger.info("[DEV EMAIL] RESEND_API_KEY not set. Captured message for %s (Purpose: %s)", to_email, purpose)
-        record["live_delivery"] = False
-        LAST_SENT_EMAILS.append(record)
-        print("\n" + "=" * 58, flush=True)
-        print("📨 [SMARTDOCS DEV EMAIL - VERIFICATION CODE]", flush=True)
-        print(f"To:      {to_email}", flush=True)
-        print(f"Subject: {subject}", flush=True)
-        if otp_code:
-            print(f"🔑 OTP CODE: {otp_code}", flush=True)
-        print("💡 Note: Add RESEND_API_KEY and EMAIL_FROM in environment for live Resend delivery.", flush=True)
-        print("=" * 58 + "\n", flush=True)
-        return True
+        logger.error("Email delivery unavailable because provider configuration is missing.")
+        _LAST_DELIVERY_ERROR = "Email provider is not configured."
+        return False
 
 def send_signup_otp_email(
     to_email: str,
     recipient_name: str,
     otp: str,
-    expires_minutes: int = 10
+    expires_minutes: int = 5
 ) -> bool:
     """Dispatches sign-up email verification OTP."""
     subject = "[SmartDocs SVNIT] Verify Your Institutional Email Address"
@@ -302,7 +266,7 @@ def send_login_otp_email(
     to_email: str,
     recipient_name: str,
     otp: str,
-    expires_minutes: int = 10
+    expires_minutes: int = 5
 ) -> bool:
     """Dispatches two-factor login verification OTP."""
     subject = "[SmartDocs SVNIT] Your One-Time Login Verification Code"
@@ -315,7 +279,7 @@ def send_password_reset_otp_email(
     to_email: str,
     recipient_name: str,
     otp: str,
-    expires_minutes: int = 10
+    expires_minutes: int = 5
 ) -> bool:
     """Dispatches password recovery verification OTP."""
     subject = "[SmartDocs SVNIT] Password Reset Verification Code"
@@ -325,8 +289,5 @@ def send_password_reset_otp_email(
     return send_email(to_email, subject, html, text, purpose="password_reset", otp_code=otp)
 
 def get_latest_sent_otp(email: str, purpose: str) -> Optional[str]:
-    """Helper for automated tests to retrieve the latest OTP sent to an email."""
-    for record in reversed(LAST_SENT_EMAILS):
-        if record["to_email"].lower() == email.lower() and record["purpose"] == purpose:
-            return record.get("otp_code")
+    """Deprecated secure behavior: OTPs are not retained by the mail service."""
     return None

@@ -40,9 +40,6 @@ def seed_database():
                         "UPDATE users SET hashed_password = ?, status = 'active', is_active = 1, is_verified = 1 WHERE email = ?",
                         (hash_password(pwd), email)
                     )
-        else:
-            # In production, ensure existing users have is_verified synchronized
-            conn.execute("UPDATE users SET is_verified = 1 WHERE is_verified IS NULL OR is_verified = 0 AND status = 'active'")
 
         # 2. Seed pre-approved Reusable Clauses
         clauses_to_seed = [

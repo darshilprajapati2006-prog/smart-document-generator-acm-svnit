@@ -309,11 +309,11 @@ export async function resendLoginOtp({ challenge_id }) {
   return res.json();
 }
 
-export async function registerUser({ full_name, email, password, confirm_password }) {
+export async function registerUser({ role, full_name, email, password, confirm_password }) {
   const res = await fetch(`${API_BASE_URL}/api/auth/register`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ full_name, email, password, confirm_password }),
+    body: JSON.stringify({ role, full_name, email, password, confirm_password }),
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));

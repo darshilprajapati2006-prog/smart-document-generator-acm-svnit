@@ -130,6 +130,8 @@ def get_current_user(credentials: Optional[HTTPAuthorizationCredentials] = Secur
             ).fetchone()
             if not user_row or user_row["is_active"] == 0 or user_row["status"] == "inactive":
                 return None
+            if user_row["is_verified"] == 0 or user_row["status"] == "pending_verification":
+                return None
             user["role"] = user_row["role"]
             user["full_name"] = user_row["full_name"]
             user["status"] = user_row["status"]
@@ -160,6 +162,8 @@ def require_authenticated_user(credentials: Optional[HTTPAuthorizationCredential
                 status_code=403,
                 detail="Account is deactivated. Please contact the System Administrator."
             )
+        if user_row["is_verified"] == 0 or user_row["status"] == "pending_verification":
+            raise HTTPException(status_code=403, detail="Please verify your email address before signing in.")
         # Keep authenticated context strictly synchronized with active database record
         user["role"] = user_row["role"]
         user["full_name"] = user_row["full_name"]
