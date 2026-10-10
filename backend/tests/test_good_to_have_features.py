@@ -22,7 +22,7 @@ from fastapi.testclient import TestClient
 from app.main import app
 from app.core.security import create_access_token
 
-client = TestClient(app)
+client = TestClient(app, headers={"Authorization": "Bearer test-firebase:usr-author-01:author@svnit.acm.org:1"})
 
 # Helper tokens for testing roles
 def get_auth_header(role="author", user_id="usr-author-01", name="Test User"):
@@ -376,7 +376,7 @@ def test_rbac_register_login_and_role_protection():
     uid = f"uid-{uuid.uuid4().hex}"
     headers = {"Authorization": f"Bearer test-firebase:{uid}:{email}:0"}
     reg = client.post("/api/auth/register", headers=headers, json={
-        "role": "author", "full_name": "Test RBAC Author", "email": email,
+        "requested_role": "author", "full_name": "Test RBAC Author", "email": email,
     })
     assert reg.status_code == 200
     blocked = client.post("/api/auth/session", headers=headers)
@@ -488,7 +488,7 @@ def test_cryptographic_signature_and_tamper_detection():
 # ============================================================
 
 def test_analytics_dashboard_metrics():
-    res = client.get("/api/documents/analytics/dashboard")
+    res = client.get("/api/documents/analytics/dashboard", headers=get_auth_header("admin", "usr-admin-01"))
     assert res.status_code == 200
     data = res.json()
     assert "total_documents_generated" in data

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { fetchUsers, createUser, updateUserRole, updateUserStatus, deleteUser } from "../services/documentApi";
+import { fetchUsers, createInvitation, updateUserRole, updateUserStatus, deleteUser, revokeInvitation, fetchRoleRequests, reviewRoleRequest } from "../services/documentApi";
 
 const ROLES = [
   { value: "author", label: "Author", color: "#0284c7" },
@@ -11,24 +11,24 @@ const ROLES = [
 ];
 
 export default function UserManagementModal({ isOpen, onClose, currentUserId }) {
-  if (!isOpen) return null;
-
   const [users, setUsers] = useState([]);
+  const [invitations, setInvitations] = useState([]);
+  const [roleRequests, setRoleRequests] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [successMsg, setSuccessMsg] = useState(null);
 
-  // Form states for creating a new user
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [newEmail, setNewEmail] = useState("");
-  const [newName, setNewName] = useState("");
-  const [newPassword, setNewPassword] = useState("");
   const [newRole, setNewRole] = useState("author");
+  const [invitationUrl, setInvitationUrl] = useState("");
   const [creating, setCreating] = useState(false);
 
   useEffect(() => {
-    loadUsers();
-  }, []);
+    if (isOpen) loadUsers();
+  }, [isOpen]);
+
+  if (!isOpen) return null;
 
   async function loadUsers() {
     setLoading(true);
@@ -36,6 +36,9 @@ export default function UserManagementModal({ isOpen, onClose, currentUserId }) 
     try {
       const res = await fetchUsers();
       setUsers(res.users || []);
+      setInvitations(res.invitations || []);
+      const requests = await fetchRoleRequests();
+      setRoleRequests(requests.requests || []);
     } catch (err) {
       setError(err.message || "Failed to load user accounts.");
     } finally {
@@ -48,26 +51,25 @@ export default function UserManagementModal({ isOpen, onClose, currentUserId }) 
     setError(null);
     setSuccessMsg(null);
 
-    if (!newEmail.trim() || !newPassword.trim() || !newName.trim()) {
-      setError("Please fill in all user fields.");
+    if (!newEmail.trim()) {
+      setError("Enter the institutional email address to invite.");
       return;
     }
 
+    const privilegedInvitation = ["reviewer", "approver", "template_admin", "admin"].includes(newRole);
+    if (privilegedInvitation && !window.confirm(`Issue a one-time ${ROLES.find((r) => r.value === newRole)?.label} invitation to ${newEmail.trim()}?`)) return;
+
     setCreating(true);
     try {
-      await createUser({
+      const result = await createInvitation({
         email: newEmail.trim(),
-        password: newPassword,
-        full_name: newName.trim(),
         role: newRole,
-        status: "active",
+        confirm_privileged: privilegedInvitation,
       });
-      setSuccessMsg(`User '${newName}' created successfully with role '${newRole}'.`);
+      setInvitationUrl(result.invitation_url);
+      setSuccessMsg(`Invitation for ${newEmail.trim()} created. Copy and share the one-time link.`);
       setNewEmail("");
-      setNewName("");
-      setNewPassword("");
       setNewRole("author");
-      setShowCreateForm(false);
       await loadUsers();
     } catch (err) {
       setError(err.message || "Failed to create user.");
@@ -79,12 +81,41 @@ export default function UserManagementModal({ isOpen, onClose, currentUserId }) 
   async function handleRoleChange(userId, targetRole) {
     setError(null);
     setSuccessMsg(null);
+    const privileged = ["reviewer", "approver", "template_admin", "admin"].includes(targetRole);
+    if (privileged && !window.confirm(`Confirm assigning ${ROLES.find((r) => r.value === targetRole)?.label || targetRole}? This grants privileged access.`)) {
+      await loadUsers();
+      return;
+    }
     try {
-      await updateUserRole(userId, targetRole);
+      await updateUserRole(userId, targetRole, privileged);
       setSuccessMsg(`User role updated to '${targetRole}'.`);
       await loadUsers();
     } catch (err) {
       setError(err.message || "Failed to update role.");
+    }
+  }
+
+  async function handleRevokeInvitation(invitation) {
+    if (!window.confirm(`Revoke the unused invitation for ${invitation.email}?`)) return;
+    try {
+      await revokeInvitation(invitation.id);
+      setSuccessMsg(`Invitation for ${invitation.email} revoked.`);
+      setInvitationUrl("");
+      await loadUsers();
+    } catch (err) {
+      setError(err.message || "Failed to revoke invitation.");
+    }
+  }
+
+  async function handleRoleRequestReview(request, decision) {
+    const confirmPrivileged = decision === "approve";
+    if (confirmPrivileged && !window.confirm(`Approve ${request.requested_role.replaceAll("_", " ")} access for ${request.email}?`)) return;
+    try {
+      await reviewRoleRequest(request.id, decision, confirmPrivileged);
+      setSuccessMsg(`Role request ${decision === "approve" ? "approved" : "rejected"}.`);
+      await loadUsers();
+    } catch (err) {
+      setError(err.message || "Failed to review role request.");
     }
   }
 
@@ -186,7 +217,7 @@ export default function UserManagementModal({ isOpen, onClose, currentUserId }) 
           </div>
           <button
             type="button"
-            onClick={onClose}
+            onClick={() => { setInvitationUrl(""); onClose(); }}
             aria-label="Close user management"
             style={{
               background: "transparent",
@@ -248,13 +279,13 @@ export default function UserManagementModal({ isOpen, onClose, currentUserId }) 
                   cursor: "pointer",
                 }}
               >
-                {showCreateForm ? "Cancel Form" : "➕ Create New User"}
+                {showCreateForm ? "Cancel Invitation" : "➕ Invite User"}
               </button>
             </div>
           </div>
         </div>
 
-        {/* Create User Form Section */}
+        {/* Admin invitation form */}
         {showCreateForm && (
           <form
             onSubmit={handleCreateUser}
@@ -263,48 +294,21 @@ export default function UserManagementModal({ isOpen, onClose, currentUserId }) 
               background: "#f8fafc",
               borderBottom: "1px solid #e2e8f0",
               display: "grid",
-              gridTemplateColumns: "1fr 1fr 1fr 1fr auto",
+              gridTemplateColumns: "minmax(180px, 2fr) minmax(140px, 1fr) auto",
               gap: "10px",
               alignItems: "end",
             }}
           >
             <div>
               <label style={{ display: "block", fontSize: "0.75rem", fontWeight: 600, color: "#475569", marginBottom: "3px" }}>
-                Full Name *
-              </label>
-              <input
-                type="text"
-                placeholder="e.g., Darshil Prajapati"
-                value={newName}
-                onChange={(e) => setNewName(e.target.value)}
-                required
-                style={{ width: "100%", padding: "7px 10px", borderRadius: "6px", border: "1px solid #cbd5e1", fontSize: "0.82rem", boxSizing: "border-box" }}
-              />
-            </div>
-            <div>
-              <label style={{ display: "block", fontSize: "0.75rem", fontWeight: 600, color: "#475569", marginBottom: "3px" }}>
-                Email Address *
+                Institutional Email *
               </label>
               <input
                 type="email"
-                placeholder="e.g., user@svnit.acm.org"
+                placeholder="e.g., rollno@dept.svnit.ac.in"
                 value={newEmail}
                 onChange={(e) => setNewEmail(e.target.value)}
                 required
-                style={{ width: "100%", padding: "7px 10px", borderRadius: "6px", border: "1px solid #cbd5e1", fontSize: "0.82rem", boxSizing: "border-box" }}
-              />
-            </div>
-            <div>
-              <label style={{ display: "block", fontSize: "0.75rem", fontWeight: 600, color: "#475569", marginBottom: "3px" }}>
-                Password (min 6 chars) *
-              </label>
-              <input
-                type="password"
-                placeholder="Password"
-                value={newPassword}
-                onChange={(e) => setNewPassword(e.target.value)}
-                required
-                minLength={6}
                 style={{ width: "100%", padding: "7px 10px", borderRadius: "6px", border: "1px solid #cbd5e1", fontSize: "0.82rem", boxSizing: "border-box" }}
               />
             </div>
@@ -340,10 +344,20 @@ export default function UserManagementModal({ isOpen, onClose, currentUserId }) 
                   height: "33px",
                 }}
               >
-                {creating ? "Saving..." : "Save User"}
+                {creating ? "Creating..." : "Create Invitation"}
               </button>
             </div>
           </form>
+        )}
+
+        {invitationUrl && (
+          <div style={{ padding: "12px 24px", background: "#eff6ff", borderBottom: "1px solid #bfdbfe", overflowWrap: "anywhere" }}>
+            <strong style={{ color: "#1e3a8a", fontSize: ".82rem" }}>One-time invitation link (shown once):</strong>
+            <div style={{ display: "flex", gap: 8, marginTop: 6 }}>
+              <input readOnly value={invitationUrl} aria-label="Invitation link" style={{ flex: 1, minWidth: 0, padding: 7 }} />
+              <button type="button" onClick={() => navigator.clipboard.writeText(invitationUrl)} style={{ padding: "6px 10px" }}>Copy</button>
+            </div>
+          </div>
         )}
 
         {/* User Table */}
@@ -360,6 +374,8 @@ export default function UserManagementModal({ isOpen, onClose, currentUserId }) 
                   <th style={{ padding: "10px 12px" }}>Email</th>
                   <th style={{ padding: "10px 12px" }}>Assigned Role</th>
                   <th style={{ padding: "10px 12px" }}>Status</th>
+                  <th style={{ padding: "10px 12px" }}>Email Verified</th>
+                  <th style={{ padding: "10px 12px" }}>Created</th>
                   <th style={{ padding: "10px 12px", textAlign: "right" }}>Actions</th>
                 </tr>
               </thead>
@@ -410,6 +426,8 @@ export default function UserManagementModal({ isOpen, onClose, currentUserId }) 
                           {isActive ? "● Active" : "○ Inactive"}
                         </span>
                       </td>
+                      <td style={{ padding: "10px 12px" }}>{u.is_verified ? "Verified" : "Pending"}</td>
+                      <td style={{ padding: "10px 12px", whiteSpace: "nowrap" }}>{u.created_at || "—"}</td>
                       <td style={{ padding: "10px 12px", textAlign: "right" }}>
                         <div style={{ display: "flex", gap: "6px", justifyContent: "flex-end" }}>
                           <button
@@ -455,6 +473,38 @@ export default function UserManagementModal({ isOpen, onClose, currentUserId }) 
                 })}
               </tbody>
             </table>
+          )}
+
+          {invitations.length > 0 && (
+            <section style={{ marginTop: 24 }}>
+              <h4 style={{ color: "#0f172a" }}>Invitations</h4>
+              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: ".82rem" }}>
+                <thead><tr style={{ textAlign: "left", color: "#475569" }}><th>Email</th><th>Role</th><th>Status</th><th>Expires</th><th /></tr></thead>
+                <tbody>{invitations.map((inv) => {
+                  const inviteStatus = inv.used_at ? "Accepted" : inv.revoked_at ? "Revoked" : new Date(inv.expires_at) <= new Date() ? "Expired" : "Pending";
+                  return <tr key={inv.id} style={{ borderTop: "1px solid #e2e8f0" }}>
+                    <td>{inv.email}</td><td>{ROLES.find((r) => r.value === inv.role)?.label || inv.role}</td><td>{inviteStatus}</td><td>{new Date(inv.expires_at).toLocaleString()}</td>
+                    <td>{inviteStatus === "Pending" && <button type="button" onClick={() => handleRevokeInvitation(inv)}>Revoke</button>}</td>
+                  </tr>;
+                })}</tbody>
+              </table>
+            </section>
+          )}
+
+          {roleRequests.length > 0 && (
+            <section style={{ marginTop: 24 }}>
+              <h4 style={{ color: "#0f172a" }}>Role Requests</h4>
+              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: ".82rem" }}>
+                <thead><tr style={{ textAlign: "left", color: "#475569" }}><th>Email</th><th>Requested role</th><th>Status</th><th>Submitted</th><th /></tr></thead>
+                <tbody>{roleRequests.map((request) => <tr key={request.id} style={{ borderTop: "1px solid #e2e8f0" }}>
+                  <td>{request.email}</td><td>{request.requested_role.replaceAll("_", " ")}</td><td>{request.status}</td><td>{new Date(request.created_at).toLocaleString()}</td>
+                  <td>{request.status === "pending" && <span style={{ display: "flex", gap: 6 }}>
+                    <button type="button" onClick={() => handleRoleRequestReview(request, "approve")}>Approve</button>
+                    <button type="button" onClick={() => handleRoleRequestReview(request, "reject")}>Reject</button>
+                  </span>}</td>
+                </tr>)}</tbody>
+              </table>
+            </section>
           )}
         </div>
 

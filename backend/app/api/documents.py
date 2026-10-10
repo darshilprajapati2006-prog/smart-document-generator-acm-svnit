@@ -27,9 +27,25 @@ from app.services.google_integration_service import GoogleIntegrationService
 from app.services.email_distribution_service import EmailDistributionService
 from app.services.signature_service import SignatureService
 from app.services.analytics_service import AnalyticsService
-from app.core.security import get_current_user, require_authenticated_user, require_role
+from app.core.security import require_authenticated_user, require_role
+from app.db.database import get_db
 
 router = APIRouter(prefix="/documents", tags=["documents"])
+
+def _assert_document_access(doc_id: str, user: Dict[str, Any], write: bool = False):
+    doc = DocumentRepository.get_document(doc_id)
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found.")
+    role = user.get("role")
+    elevated_reader = role in {"admin", "reviewer", "approver", "template_admin"}
+    owns = doc.get("user_id") == user.get("sub")
+    if not owns and not elevated_reader:
+        raise HTTPException(status_code=403, detail="You do not have access to this document.")
+    if write and role not in {"author", "admin"}:
+        raise HTTPException(status_code=403, detail="Your role cannot modify documents.")
+    if write and role != "admin" and not owns:
+        raise HTTPException(status_code=403, detail="You can modify only your own documents.")
+    return doc
 
 @router.get("/templates")
 def list_templates():
@@ -47,13 +63,11 @@ def get_template_details(template_id: str):
     return tmpl.to_dict()
 
 @router.post("/executive-meet/generate")
-def generate_executive_meet(data: ExecutiveMeetRequest, current_user: Optional[Dict[str, Any]] = Depends(get_current_user)):
+def generate_executive_meet(data: ExecutiveMeetRequest, current_user: Dict[str, Any] = Depends(require_role(["author"]))):
     """Generates DOCX and PDF for Executive Meet permission request and persists version record."""
-    if current_user and current_user.get("role") == "viewer":
-        raise HTTPException(status_code=403, detail="Viewer role has read-only access and cannot generate documents.")
     t0 = time.time()
-    user_id = current_user.get("sub") if current_user else "guest-user"
-    user_role = current_user.get("role") if current_user else "viewer"
+    user_id = current_user.get("sub")
+    user_role = current_user.get("role")
     try:
         doc_id, session_dir = file_manager.create_session()
         
@@ -79,6 +93,8 @@ def generate_executive_meet(data: ExecutiveMeetRequest, current_user: Optional[D
             pdf_path=str(pdf_path),
             change_summary="Initial generation"
         )
+        with get_db() as conn:
+            conn.execute("INSERT INTO document_artifacts(artifact_id,document_id,user_id) VALUES(?,?,?)", (doc_id, doc_record["id"], user_id))
         
         AnalyticsService.record_event(
             event_type="document_generated",
@@ -119,13 +135,11 @@ def generate_executive_meet(data: ExecutiveMeetRequest, current_user: Optional[D
         raise HTTPException(status_code=500, detail=f"Generation failed: {str(e)}")
 
 @router.post("/bill-certificate/generate")
-def generate_bill_certificate(data: BillCertificateRequest, current_user: Optional[Dict[str, Any]] = Depends(get_current_user)):
+def generate_bill_certificate(data: BillCertificateRequest, current_user: Dict[str, Any] = Depends(require_role(["author"]))):
     """Generates DOCX and PDF for Bill Certificate (Recurring Expenditure) and persists version record."""
-    if current_user and current_user.get("role") == "viewer":
-        raise HTTPException(status_code=403, detail="Viewer role has read-only access and cannot generate documents.")
     t0 = time.time()
-    user_id = current_user.get("sub") if current_user else "guest-user"
-    user_role = current_user.get("role") if current_user else "viewer"
+    user_id = current_user.get("sub")
+    user_role = current_user.get("role")
     try:
         doc_id, session_dir = file_manager.create_session()
         
@@ -152,6 +166,8 @@ def generate_bill_certificate(data: BillCertificateRequest, current_user: Option
             pdf_path=str(pdf_path),
             change_summary="Initial generation"
         )
+        with get_db() as conn:
+            conn.execute("INSERT INTO document_artifacts(artifact_id,document_id,user_id) VALUES(?,?,?)", (doc_id, doc_record["id"], user_id))
         
         AnalyticsService.record_event(
             event_type="document_generated",
@@ -198,13 +214,11 @@ def generate_bill_certificate(data: BillCertificateRequest, current_user: Option
         raise HTTPException(status_code=500, detail=f"Generation failed: {str(e)}")
 
 @router.post("/bill-summary/generate")
-def generate_bill_summary(data: BillSummaryRequest, current_user: Optional[Dict[str, Any]] = Depends(get_current_user)):
+def generate_bill_summary(data: BillSummaryRequest, current_user: Dict[str, Any] = Depends(require_role(["author"]))):
     """Generates DOCX and PDF for Bill Summary and persists version record."""
-    if current_user and current_user.get("role") == "viewer":
-        raise HTTPException(status_code=403, detail="Viewer role has read-only access and cannot generate documents.")
     t0 = time.time()
-    user_id = current_user.get("sub") if current_user else "guest-user"
-    user_role = current_user.get("role") if current_user else "viewer"
+    user_id = current_user.get("sub")
+    user_role = current_user.get("role")
     try:
         doc_id, session_dir = file_manager.create_session()
         
@@ -231,6 +245,8 @@ def generate_bill_summary(data: BillSummaryRequest, current_user: Optional[Dict[
             pdf_path=str(pdf_path),
             change_summary="Initial generation"
         )
+        with get_db() as conn:
+            conn.execute("INSERT INTO document_artifacts(artifact_id,document_id,user_id) VALUES(?,?,?)", (doc_id, doc_record["id"], user_id))
         
         AnalyticsService.record_event(
             event_type="document_generated",
@@ -277,8 +293,13 @@ def generate_bill_summary(data: BillSummaryRequest, current_user: Optional[Dict[
         raise HTTPException(status_code=500, detail=f"Generation failed: {str(e)}")
 
 @router.get("/download/{doc_id}/{file_format}")
-def download_document(doc_id: str, file_format: str):
+def download_document(doc_id: str, file_format: str, current_user: Dict[str, Any] = Depends(require_authenticated_user)):
     """Safely serves generated DOCX and PDF files with content-disposition."""
+    with get_db() as conn:
+        artifact = conn.execute("SELECT user_id,document_id FROM document_artifacts WHERE artifact_id=?", (doc_id,)).fetchone()
+    if not artifact:
+        raise HTTPException(status_code=404, detail="Document not found.")
+    document = _assert_document_access(artifact["document_id"], current_user)
     target_path, filename = file_manager.get_file(doc_id, file_format)
     
     media_types = {
@@ -488,7 +509,7 @@ def extract_brief_description(text: str) -> Optional[str]:
     return None
 
 @router.post("/nlp/extract")
-def extract_fields_from_nlp(request: NLPExtractRequest):
+def extract_fields_from_nlp(request: NLPExtractRequest, current_user: Dict[str, Any] = Depends(require_authenticated_user)):
     """
     Deterministic natural-language extraction helper.
     Extracts only fields explicitly mentioned or unambiguously inferable from the prompt.
@@ -709,7 +730,7 @@ class ClassifyRequest(BaseModel):
     explicitly_selected: Optional[str] = None
 
 @router.post("/classify")
-def classify_prompt(req: ClassifyRequest):
+def classify_prompt(req: ClassifyRequest, current_user: Dict[str, Any] = Depends(require_authenticated_user)):
     """
     Feature 1: Automatic Document-Type Detection.
     Classifies prompt to recommend optimal document type with confidence scoring and ambiguity detection.
@@ -730,23 +751,30 @@ class BatchGenerateRequest(BaseModel):
     jobs: List[BatchJobPayload]
 
 @router.post("/batch/generate")
-def batch_generate(req: BatchGenerateRequest, current_user: Optional[Dict[str, Any]] = Depends(get_current_user)):
+def batch_generate(req: BatchGenerateRequest, current_user: Dict[str, Any] = Depends(require_role(["author"]))):
     """
     Feature 3: Batch Document Generation.
     Executes multiple document jobs in isolation with per-job status and zip bundle creation.
     """
-    if current_user and current_user.get("role") == "viewer":
-        raise HTTPException(status_code=403, detail="Viewer role has read-only access and cannot generate documents.")
-    user_id = current_user.get("sub") if current_user else "batch-user"
+    user_id = current_user.get("sub")
     raw_jobs = [{"job_id": j.job_id, "document_type": j.document_type, "payload": j.payload} for j in req.jobs]
     res = BatchService.process_batch(raw_jobs, user_id=user_id)
-    AnalyticsService.record_event("batch_generated", None, None, "success", current_user.get("role") if current_user else "viewer")
+    if res.get("zip_download_url"):
+        with get_db() as conn:
+            conn.execute("INSERT INTO batch_artifacts(batch_id,user_id) VALUES(?,?)", (res["batch_id"], user_id))
+    AnalyticsService.record_event("batch_generated", None, None, "success", current_user.get("role"))
     return res
 
 @router.get("/batch/{batch_id}/zip")
-def download_batch_zip(batch_id: str):
+def download_batch_zip(batch_id: str, current_user: Dict[str, Any] = Depends(require_authenticated_user)):
     """Serves the generated batch ZIP archive."""
     try:
+        with get_db() as conn:
+            ownership = conn.execute("SELECT user_id FROM batch_artifacts WHERE batch_id=?", (batch_id,)).fetchone()
+        if not ownership:
+            raise HTTPException(status_code=404, detail="Batch archive not found.")
+        if ownership["user_id"] != current_user.get("sub") and current_user.get("role") not in {"admin", "reviewer", "approver"}:
+            raise HTTPException(status_code=403, detail="You do not have access to this batch archive.")
         zip_p = BatchService.get_batch_zip(batch_id)
         return FileResponse(
             path=str(zip_p),
@@ -762,24 +790,23 @@ def download_batch_zip(batch_id: str):
 # ============================================================
 
 @router.get("/history/list")
-def list_documents_history(current_user: Optional[Dict[str, Any]] = Depends(get_current_user)):
+def list_documents_history(current_user: Dict[str, Any] = Depends(require_authenticated_user)):
     """Feature 4: Lists all saved documents with current versions."""
-    user_id = current_user.get("sub") if current_user else None
-    role = current_user.get("role") if current_user else None
+    user_id = current_user.get("sub")
+    role = current_user.get("role")
     docs = DocumentRepository.list_documents(user_id=user_id, role=role)
     return {"documents": docs}
 
 @router.get("/{doc_id}/versions")
-def get_document_versions(doc_id: str):
+def get_document_versions(doc_id: str, current_user: Dict[str, Any] = Depends(require_authenticated_user)):
     """Feature 4: Lists all versions of a document."""
-    doc = DocumentRepository.get_document(doc_id)
-    if not doc:
-        raise HTTPException(status_code=404, detail=f"Document '{doc_id}' not found.")
+    doc = _assert_document_access(doc_id, current_user)
     versions = DocumentRepository.list_versions(doc_id)
     return {"document_id": doc_id, "versions": versions}
 
 @router.get("/{doc_id}/versions/{version_num}")
-def get_document_version_detail(doc_id: str, version_num: int):
+def get_document_version_detail(doc_id: str, version_num: int, current_user: Dict[str, Any] = Depends(require_authenticated_user)):
+    _assert_document_access(doc_id, current_user)
     """Feature 4: Retrieves source data and artifact details for a specific version."""
     v = DocumentRepository.get_version_detail(doc_id, version_num)
     if not v:
@@ -787,9 +814,10 @@ def get_document_version_detail(doc_id: str, version_num: int):
     return v
 
 @router.post("/{doc_id}/versions/{version_num}/restore")
-def restore_document_version(doc_id: str, version_num: int, current_user: Optional[Dict[str, Any]] = Depends(get_current_user)):
+def restore_document_version(doc_id: str, version_num: int, current_user: Dict[str, Any] = Depends(require_authenticated_user)):
     """Feature 4: Restores a previous version as a new version, preserving history."""
-    user_id = current_user.get("sub") if current_user else "restorer-user"
+    _assert_document_access(doc_id, current_user, write=True)
+    user_id = current_user.get("sub")
     try:
         updated = DocumentRepository.restore_version(doc_id, version_num, user_id=user_id)
         return {
@@ -818,6 +846,7 @@ def transition_workflow_status(
     Feature 5: Approval / Review Workflow.
     Executes role-authorized state transition with audit log.
     """
+    _assert_document_access(doc_id, current_user)
     try:
         res = WorkflowService.transition(
             doc_id=doc_id,
@@ -832,8 +861,9 @@ def transition_workflow_status(
         raise HTTPException(status_code=status_code, detail=str(e))
 
 @router.get("/{doc_id}/workflow/history")
-def get_workflow_audit_history(doc_id: str):
+def get_workflow_audit_history(doc_id: str, current_user: Dict[str, Any] = Depends(require_authenticated_user)):
     """Feature 5: Retrieves audit history of all approval actions and comments."""
+    _assert_document_access(doc_id, current_user)
     history = WorkflowService.get_history(doc_id)
     return {"document_id": doc_id, "history": history}
 
@@ -907,7 +937,7 @@ def update_reusable_clause(
     return updated
 
 @router.post("/clauses/interpolate")
-def interpolate_clause_variables(req: ClauseInterpolateRequest):
+def interpolate_clause_variables(req: ClauseInterpolateRequest, current_user: Dict[str, Any] = Depends(require_authenticated_user)):
     """Feature 6: Safely substitutes variables into a clause without code execution."""
     content = req.content
     if not content and req.clause_id:
@@ -933,14 +963,15 @@ class UpdateDocumentSourceRequest(BaseModel):
 def update_document_source(
     doc_id: str,
     req: UpdateDocumentSourceRequest,
-    current_user: Optional[Dict[str, Any]] = Depends(get_current_user)
+    current_user: Dict[str, Any] = Depends(require_authenticated_user)
 ):
     """
     Feature 7: Update Existing Documents When Source Information Changes.
     Validates updated source data, regenerates DOCX/PDF, recalculates totals,
     increments version, and sets status to draft/review if previously approved.
     """
-    user_id = current_user.get("sub") if current_user else "updater-user"
+    user_id = current_user.get("sub")
+    _assert_document_access(doc_id, current_user, write=True)
     doc = DocumentRepository.get_document(doc_id)
     if not doc:
         raise HTTPException(status_code=404, detail=f"Document '{doc_id}' not found.")
@@ -1048,7 +1079,7 @@ def update_template_configuration(
 # ============================================================
 
 @router.get("/integrations/status")
-def get_integrations_status():
+def get_integrations_status(current_user: Dict[str, Any] = Depends(require_authenticated_user)):
     """Features 10 & 11: Reports live status of Google and Email integrations."""
     return {
         "google": GoogleIntegrationService.get_status(),
@@ -1063,16 +1094,18 @@ class ExportDriveRequest(BaseModel):
     file_format: Optional[str] = "pdf"
 
 @router.post("/{doc_id}/export/google-drive")
-def export_document_to_google_drive(doc_id: str, req: ExportDriveRequest):
+def export_document_to_google_drive(doc_id: str, req: ExportDriveRequest, current_user: Dict[str, Any] = Depends(require_role(["author", "reviewer", "approver"]))):
     """Feature 10: Exports document to Google Drive."""
+    _assert_document_access(doc_id, current_user)
     try:
         return GoogleIntegrationService.export_to_drive(doc_id, file_format=req.file_format or "pdf")
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
 
 @router.post("/{doc_id}/export/google-sheets")
-def export_document_to_google_sheets(doc_id: str):
+def export_document_to_google_sheets(doc_id: str, current_user: Dict[str, Any] = Depends(require_role(["author", "reviewer", "approver"]))):
     """Feature 10: Appends document record to Google Sheets."""
+    _assert_document_access(doc_id, current_user)
     try:
         return GoogleIntegrationService.export_to_sheets(doc_id)
     except ValueError as e:
@@ -1088,10 +1121,11 @@ class DistributeEmailRequest(BaseModel):
 def distribute_document_email(
     doc_id: str,
     req: DistributeEmailRequest,
-    current_user: Optional[Dict[str, Any]] = Depends(get_current_user)
+    current_user: Dict[str, Any] = Depends(require_role(["author", "reviewer", "approver"]))
 ):
     """Feature 11: Distributes document via email with validation and audit logging."""
-    sender = current_user or {"sub": "guest-user", "full_name": "ACM Member"}
+    _assert_document_access(doc_id, current_user)
+    sender = current_user
     try:
         return EmailDistributionService.send_document(
             doc_id=doc_id,
@@ -1112,12 +1146,10 @@ def distribute_document_email(
 def sign_document_version(
     doc_id: str,
     version_num: Optional[int] = None,
-    current_user: Dict[str, Any] = Depends(require_authenticated_user)
+    current_user: Dict[str, Any] = Depends(require_role(["approver"]))
 ):
     """Feature 12: Cryptographically signs document version using HMAC-SHA256."""
-    doc = DocumentRepository.get_document(doc_id)
-    if not doc:
-        raise HTTPException(status_code=404, detail=f"Document '{doc_id}' not found.")
+    doc = _assert_document_access(doc_id, current_user)
     target_v = version_num or doc["current_version"]
     try:
         return SignatureService.sign_document_version(doc_id, target_v, current_user)
@@ -1125,11 +1157,9 @@ def sign_document_version(
         raise HTTPException(status_code=400, detail=str(e))
 
 @router.get("/{doc_id}/signatures/verify")
-def verify_document_signature(doc_id: str, version_num: Optional[int] = None):
+def verify_document_signature(doc_id: str, version_num: Optional[int] = None, current_user: Dict[str, Any] = Depends(require_authenticated_user)):
     """Feature 12: Verifies cryptographic signature and detects payload tampering."""
-    doc = DocumentRepository.get_document(doc_id)
-    if not doc:
-        raise HTTPException(status_code=404, detail=f"Document '{doc_id}' not found.")
+    doc = _assert_document_access(doc_id, current_user)
     target_v = version_num or doc["current_version"]
     return SignatureService.verify_signature(doc_id, target_v)
 
@@ -1140,17 +1170,14 @@ def verify_document_signature(doc_id: str, version_num: Optional[int] = None):
 @router.get("/analytics/dashboard")
 def get_analytics_dashboard(
     document_type: Optional[str] = None,
-    current_user: Optional[Dict[str, Any]] = Depends(get_current_user)
+    current_user: Dict[str, Any] = Depends(require_role(["admin", "template_admin"]))
 ):
     """Feature 13: Usage Analytics Dashboard."""
     return AnalyticsService.get_dashboard_metrics(document_type=document_type)
 
 # Detail route placed at end to prevent collision with literal subpaths
 @router.get("/{doc_id}")
-def get_document_details(doc_id: str):
+def get_document_details(doc_id: str, current_user: Dict[str, Any] = Depends(require_authenticated_user)):
     """Retrieves document record and latest version details."""
-    doc = DocumentRepository.get_document(doc_id)
-    if not doc:
-        raise HTTPException(status_code=404, detail=f"Document '{doc_id}' not found.")
+    doc = _assert_document_access(doc_id, current_user)
     return doc
-

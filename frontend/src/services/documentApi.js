@@ -294,7 +294,7 @@ export async function loginUser(email, password) {
   return { access_token: token, user: data.user, requires_otp: false };
 }
 
-export async function registerUser({ role, full_name, email, password, confirm_password }) {
+export async function registerUser({ role, full_name, email, password, confirm_password, invitation_token }) {
   if (password !== confirm_password) throw new Error("Passwords do not match.");
   if (role !== "author") throw new Error("Only Author registration is available.");
   const credential = await createUserWithEmailAndPassword(firebaseAuth, email, password);
@@ -302,7 +302,7 @@ export async function registerUser({ role, full_name, email, password, confirm_p
   const token = await credential.user.getIdToken(true);
   const res = await fetch(`${API_BASE_URL}/api/auth/register`, {
     method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-    body: JSON.stringify({ role, full_name, email }),
+    body: JSON.stringify({ requested_role: role, full_name, email, invitation_token }),
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
@@ -360,28 +360,81 @@ export async function fetchUsers() {
   return res.json();
 }
 
-export async function createUser(userData) {
-  const res = await fetch(`${API_BASE_URL}/api/auth/users`, {
+export async function createInvitation(invitationData) {
+  const res = await fetch(`${API_BASE_URL}/api/auth/users/invitations`, {
     method: "POST",
     headers: getHeaders(),
-    body: JSON.stringify(userData),
+    body: JSON.stringify(invitationData),
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
-    throw new Error(err.detail || "Failed to create user account.");
+    throw new Error(err.detail || "Failed to create invitation.");
   }
   return res.json();
 }
 
-export async function updateUserRole(userId, newRole) {
+export async function updateUserRole(userId, newRole, confirmPrivilegedChange = false) {
   const res = await fetch(`${API_BASE_URL}/api/auth/users/${userId}/role`, {
     method: "PUT",
     headers: getHeaders(),
-    body: JSON.stringify({ role: newRole }),
+    body: JSON.stringify({ role: newRole, confirm_privileged_change: confirmPrivilegedChange }),
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
     throw new Error(err.detail || "Failed to update user role.");
+  }
+  return res.json();
+}
+
+export async function revokeInvitation(invitationId) {
+  const res = await fetch(`${API_BASE_URL}/api/auth/users/invitations/${encodeURIComponent(invitationId)}/revoke`, {
+    method: "POST", headers: getHeaders(),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || "Failed to revoke invitation.");
+  }
+  return res.json();
+}
+
+export async function validateInvitation(token) {
+  const res = await fetch(`${API_BASE_URL}/api/auth/invitations/validate`, {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ token }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || "Invitation is invalid or expired.");
+  }
+  return res.json();
+}
+
+export async function createRoleRequest(requestedRole) {
+  const res = await fetch(`${API_BASE_URL}/api/auth/role-requests`, {
+    method: "POST", headers: getHeaders(), body: JSON.stringify({ requested_role: requestedRole }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || "Could not submit role request.");
+  }
+  return res.json();
+}
+
+export async function fetchRoleRequests() {
+  const res = await fetch(`${API_BASE_URL}/api/auth/role-requests`, { headers: getHeaders() });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || "Failed to load role requests.");
+  }
+  return res.json();
+}
+
+export async function reviewRoleRequest(requestId, decision, confirmPrivilegedChange = false) {
+  const res = await fetch(`${API_BASE_URL}/api/auth/role-requests/${encodeURIComponent(requestId)}/review`, {
+    method: "POST", headers: getHeaders(), body: JSON.stringify({ decision, confirm_privileged_change: confirmPrivilegedChange }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || "Failed to review role request.");
   }
   return res.json();
 }

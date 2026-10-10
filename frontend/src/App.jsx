@@ -8,6 +8,7 @@ import AnalyticsDashboard from "./components/AnalyticsDashboard";
 import ClausesModal from "./components/ClausesModal";
 import LoginPage from "./components/LoginPage";
 import UserManagementModal from "./components/UserManagementModal";
+import RoleRequestModal from "./components/RoleRequestModal";
 import {
   checkBackendHealth,
   generateExecutiveMeet,
@@ -311,6 +312,7 @@ export default function App() {
   });
   const [authChecking, setAuthChecking] = useState(true);
   const [showUserMgmt, setShowUserMgmt] = useState(false);
+  const [showRoleRequest, setShowRoleRequest] = useState(false);
   const [recommendation, setRecommendation] = useState(null);
   const [showClausesModal, setShowClausesModal] = useState(false);
   const [selectedDocIdForHistory, setSelectedDocIdForHistory] = useState("");
@@ -1222,6 +1224,12 @@ export default function App() {
                 }}
               >
                 👥 Users
+              </button>
+            )}
+
+            {currentRole !== "admin" && (
+              <button type="button" onClick={() => setShowRoleRequest(true)} className="control-badge">
+                Request Role
               </button>
             )}
 
@@ -2484,6 +2492,7 @@ export default function App() {
           currentUserId={currentUser?.id}
         />
       )}
+      {showRoleRequest && <RoleRequestModal onClose={() => setShowRoleRequest(false)} />}
 
       {/* EMAIL DISTRIBUTION MODAL */}
       {emailModalOpen && (

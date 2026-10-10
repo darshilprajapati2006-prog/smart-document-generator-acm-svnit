@@ -9,7 +9,7 @@ from app.schemas.executive_meet import ExecutiveMeetRequest
 from app.schemas.bill_certificate import BillCertificateRequest, BillItem
 from app.schemas.bill_summary import BillSummaryRequest, BillSummaryRow
 
-client = TestClient(app)
+client = TestClient(app, headers={"Authorization": "Bearer test-firebase:usr-author-01:author@svnit.acm.org:1"})
 
 def test_root_endpoint():
     response = client.get("/")
@@ -440,4 +440,3 @@ def test_docx_and_pdf_binary_validity_and_content():
     assert r_pdf.status_code == 200
     assert r_pdf.content.startswith(b"%PDF-")
     assert len(r_pdf.content) > 5000
-

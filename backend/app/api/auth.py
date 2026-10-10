@@ -8,13 +8,15 @@ Implements:
 import os
 import re
 import uuid
+import hashlib
+import secrets
+from datetime import datetime, timedelta, timezone
 from typing import Dict, Any, List, Optional
 from fastapi import APIRouter, HTTPException, Depends, Header, Request, status
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.db.database import get_db
 from app.core.security import (
-    hash_password,
     require_authenticated_user,
     require_role,
     get_current_user
@@ -25,7 +27,7 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 
 EMAIL_PATTERN = re.compile(r"^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$")
 VALID_ROLES = ["viewer", "author", "reviewer", "approver", "template_admin", "admin"]
-PUBLIC_ROLES = {"author"}
+PUBLIC_ROLES = {r.strip().lower() for r in os.getenv("PUBLIC_REGISTRATION_ROLES", "author,viewer").split(",") if r.strip()} & {"author", "viewer"}
 
 def validate_password_policy(password: str) -> None:
     """Enforces appropriate institutional password policy."""
@@ -83,14 +85,16 @@ def is_approved_institutional_email(email: str) -> bool:
 # ============================================================
 
 class UserRegisterRequest(BaseModel):
-    role: str = "author"
+    model_config = ConfigDict(extra="forbid")
+    requested_role: Optional[str] = None
     full_name: str = Field(min_length=2, description="Full Name")
     email: str = Field(description="Institutional Email Address")
+    invitation_token: Optional[str] = None
 
-    @field_validator("role")
+    @field_validator("requested_role")
     @classmethod
     def validate_public_role(cls, v):
-        if v not in PUBLIC_ROLES:
+        if v is not None and v not in {"author", "viewer"}:
             raise ValueError("Please choose an available registration role.")
         return v
 
@@ -105,20 +109,19 @@ class UserRegisterRequest(BaseModel):
         return cleaned
 
 
-class AdminCreateUserRequest(BaseModel):
+class CreateInvitationRequest(BaseModel):
     email: str
-    password: str = Field(min_length=8)
-    full_name: str = Field(min_length=2)
-    role: str = Field(default="author")
-    status: str = Field(default="active")
-    is_verified: bool = Field(default=True)
+    role: str
+    expires_in_hours: int = Field(default=72, ge=1, le=720)
+    confirm_privileged: bool = False
 
     @field_validator("email")
     @classmethod
     def validate_email(cls, v):
-        if not EMAIL_PATTERN.match(v.strip()):
-            raise ValueError(f"Invalid email address format: '{v}'")
-        return v.strip().lower()
+        cleaned = v.strip().lower()
+        if not EMAIL_PATTERN.match(cleaned) or not is_approved_institutional_email(cleaned):
+            raise ValueError("Use an eligible SVNIT institutional email address.")
+        return cleaned
 
     @field_validator("role")
     @classmethod
@@ -128,8 +131,36 @@ class AdminCreateUserRequest(BaseModel):
         return v
 
 
+class RoleRequestBody(BaseModel):
+    requested_role: str
+
+    @field_validator("requested_role")
+    @classmethod
+    def validate_requested_role(cls, value):
+        if value not in {"reviewer", "approver", "template_admin"}:
+            raise ValueError("Role request is not eligible for approval.")
+        return value
+
+
+class InvitationTokenRequest(BaseModel):
+    token: str = Field(min_length=32, max_length=256)
+
+
+class ReviewRoleRequestBody(BaseModel):
+    decision: str
+    confirm_privileged_change: bool = False
+
+    @field_validator("decision")
+    @classmethod
+    def validate_decision(cls, value):
+        if value not in {"approve", "reject"}:
+            raise ValueError("Decision must be approve or reject.")
+        return value
+
+
 class UpdateRoleRequest(BaseModel):
     role: str
+    confirm_privileged_change: bool = False
 
     @field_validator("role")
     @classmethod
@@ -150,29 +181,13 @@ class UpdateStatusRequest(BaseModel):
         return v.lower()
 
 
-class BootstrapAdminRequest(BaseModel):
-    email: str
-    password: str = Field(min_length=8)
-    full_name: str = Field(min_length=2, default="System Administrator")
-    secret_key: Optional[str] = None
-
-    @field_validator("email")
-    @classmethod
-    def validate_email(cls, v):
-        if not EMAIL_PATTERN.match(v.strip()):
-            raise ValueError(f"Invalid email address format: '{v}'")
-        return v.strip().lower()
-
-
 # ============================================================
 # 1. SIGN-UP / REGISTRATION (Requirements 2 & 3)
 # ============================================================
 
 @router.post("/register")
 def register_user(request: UserRegisterRequest, authorization: Optional[str] = Header(None)):
-    """Creates a pending Author profile for a Firebase-authenticated signup."""
-    if request.role != "author":
-        raise HTTPException(status_code=403, detail="Public registration is limited to Author accounts.")
+    """Creates a pending profile using server policy or a validated invitation."""
     if not authorization or not authorization.lower().startswith("bearer "):
         raise HTTPException(status_code=401, detail="Firebase authentication required.")
     from app.core.firebase_auth import verify_firebase_id_token
@@ -186,23 +201,117 @@ def register_user(request: UserRegisterRequest, authorization: Optional[str] = H
     if not is_approved_institutional_email(email):
         raise HTTPException(status_code=403, detail="Use an SVNIT institutional email address.")
 
+    now = datetime.now(timezone.utc)
+    invitation = None
+    if request.invitation_token:
+        token_hash = hashlib.sha256(request.invitation_token.encode("utf-8")).hexdigest()
+        with get_db() as conn:
+            invitation = conn.execute(
+                "SELECT * FROM user_invitations WHERE token_hash = ? AND used_at IS NULL AND revoked_at IS NULL",
+                (token_hash,),
+            ).fetchone()
+        if not invitation:
+            raise HTTPException(status_code=400, detail="Invitation is invalid, expired, revoked, or already used.")
+        if invitation["email"].lower() != email:
+            raise HTTPException(status_code=403, detail="This invitation belongs to a different email address.")
+        if datetime.fromisoformat(invitation["expires_at"]) <= now:
+            raise HTTPException(status_code=400, detail="Invitation has expired.")
+        assigned_role = invitation["role"]
+    else:
+        if not request.requested_role or request.requested_role not in PUBLIC_ROLES:
+            raise HTTPException(status_code=403, detail="Public registration is not enabled for this role. Invitation required.")
+        assigned_role = request.requested_role
+
     with get_db() as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        uid_owner = conn.execute("SELECT email FROM users WHERE firebase_uid = ?", (claims["uid"],)).fetchone()
+        if uid_owner and uid_owner["email"].strip().lower() != email:
+            raise HTTPException(status_code=409, detail="This Firebase account is already linked to another email.")
         existing = conn.execute("SELECT * FROM users WHERE email = ?", (email,)).fetchone()
         if existing:
             if existing["firebase_uid"] and existing["firebase_uid"] != claims["uid"]:
                 raise HTTPException(status_code=409, detail="An account already exists for this email. Contact an administrator.")
-            if existing["role"] != "author":
+            if existing["role"] not in {"author", "viewer"} and not invitation:
                 raise HTTPException(status_code=409, detail="An account already exists for this email. Contact an administrator.")
             # Never claim even an Author profile until Firebase confirms mailbox ownership.
             if not claims.get("email_verified"):
                 raise HTTPException(status_code=403, detail="Verify your email address before completing registration.")
-            conn.execute("UPDATE users SET firebase_uid = ? WHERE id = ?", (claims["uid"], existing["id"]))
+            if invitation:
+                conn.execute("UPDATE users SET firebase_uid = ?, role = ? WHERE id = ?", (claims["uid"], assigned_role, existing["id"]))
+            else:
+                conn.execute("UPDATE users SET firebase_uid = ? WHERE id = ?", (claims["uid"], existing["id"]))
         else:
             conn.execute(
                 "INSERT INTO users (id,email,hashed_password,full_name,role,status,is_active,is_verified,firebase_uid) VALUES (?,?,?,?,?,'pending_verification',1,0,?)",
-                (claims["uid"], email, "firebase-managed", request.full_name.strip(), "author", claims["uid"]),
+                (claims["uid"], email, "firebase-managed", request.full_name.strip(), assigned_role, claims["uid"]),
             )
-    return {"success": True, "requires_email_verification": not bool(claims.get("email_verified")), "message": "Account created. Check your inbox for the verification link."}
+        if invitation:
+            used = conn.execute(
+                "UPDATE user_invitations SET used_at = ? WHERE id = ? AND used_at IS NULL AND revoked_at IS NULL AND expires_at > ?",
+                (now.isoformat(), invitation["id"], now.isoformat()),
+            )
+            if used.rowcount != 1:
+                raise HTTPException(status_code=400, detail="Invitation is expired or has already been used.")
+    return {"success": True, "role": assigned_role, "requires_email_verification": not bool(claims.get("email_verified")), "message": "Account created. Check your inbox for the verification link."}
+
+
+@router.post("/invitations/validate")
+def validate_invitation(req: InvitationTokenRequest):
+    token = req.token
+    token_hash = hashlib.sha256(token.encode("utf-8")).hexdigest()
+    now = datetime.now(timezone.utc)
+    with get_db() as conn:
+        invitation = conn.execute(
+            "SELECT email, role, expires_at FROM user_invitations WHERE token_hash = ? AND used_at IS NULL AND revoked_at IS NULL",
+            (token_hash,),
+        ).fetchone()
+    if not invitation or datetime.fromisoformat(invitation["expires_at"]) <= now:
+        raise HTTPException(status_code=404, detail="Invitation is invalid or expired.")
+    return {"email": invitation["email"], "role": invitation["role"], "expires_at": invitation["expires_at"]}
+
+
+@router.post("/role-requests")
+def create_role_request(req: RoleRequestBody, user: Dict[str, Any] = Depends(require_authenticated_user)):
+    request_id = str(uuid.uuid4())
+    with get_db() as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        existing = conn.execute("SELECT id FROM user_role_requests WHERE user_id=? AND status='pending'", (user["sub"],)).fetchone()
+        if existing:
+            raise HTTPException(status_code=409, detail="You already have a role request pending.")
+        conn.execute("INSERT INTO user_role_requests(id,user_id,email,requested_role) VALUES(?,?,?,?)", (request_id, user["sub"], user["email"], req.requested_role))
+        record_audit_log(conn, action="role_requested", actor_id=user.get("sub"), actor_email=user.get("email"), target_user_id=user.get("sub"), details={"requested_role": req.requested_role})
+    return {"success": True, "request_id": request_id, "status": "pending"}
+
+
+@router.get("/role-requests")
+def list_role_requests(current_admin: Dict[str, Any] = Depends(require_role(["admin"]))):
+    with get_db() as conn:
+        rows = conn.execute("SELECT * FROM user_role_requests ORDER BY created_at DESC").fetchall()
+    return {"success": True, "requests": [dict(row) for row in rows]}
+
+
+@router.post("/role-requests/{request_id}/review")
+def review_role_request(request_id: str, req: ReviewRoleRequestBody, current_admin: Dict[str, Any] = Depends(require_role(["admin"]))):
+    with get_db() as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        role_request = conn.execute("SELECT * FROM user_role_requests WHERE id=?", (request_id,)).fetchone()
+        if not role_request:
+            raise HTTPException(status_code=404, detail="Role request not found.")
+        if role_request["status"] != "pending":
+            raise HTTPException(status_code=409, detail="Role request has already been reviewed.")
+        if role_request["user_id"] == current_admin.get("sub"):
+            raise HTTPException(status_code=403, detail="You cannot approve your own role request.")
+        target_user = conn.execute("SELECT is_active, status FROM users WHERE id=?", (role_request["user_id"],)).fetchone()
+        if not target_user or target_user["is_active"] == 0 or target_user["status"] == "inactive":
+            raise HTTPException(status_code=409, detail="The requesting account is no longer active.")
+        if req.decision == "approve" and not req.confirm_privileged_change:
+            raise HTTPException(status_code=400, detail="Explicit confirmation is required to approve a privileged role request.")
+        now = datetime.now(timezone.utc).isoformat()
+        if req.decision == "approve":
+            conn.execute("UPDATE users SET role=? WHERE id=?", (role_request["requested_role"], role_request["user_id"]))
+        conn.execute("UPDATE user_role_requests SET status=?, reviewed_by=?, reviewed_at=? WHERE id=?", ("approved" if req.decision == "approve" else "rejected", current_admin.get("sub"), now, request_id))
+        record_audit_log(conn, action="role_request_reviewed", actor_id=current_admin.get("sub"), actor_email=current_admin.get("email"), target_user_id=role_request["user_id"], details={"request_id": request_id, "decision": req.decision, "role": role_request["requested_role"]})
+    return {"success": True, "request_id": request_id, "status": "approved" if req.decision == "approve" else "rejected"}
 
 
 @router.post("/session")
@@ -273,68 +382,63 @@ def get_current_user_profile(user: Dict[str, Any] = Depends(require_authenticate
 # ============================================================
 
 @router.post("/bootstrap-admin")
-def bootstrap_admin(
-    req: BootstrapAdminRequest,
-    x_bootstrap_secret: Optional[str] = Header(None)
-):
-    """
-    Secure bootstrap mechanism to create or promote the initial System Admin account.
-    Allowed only if:
-    - No active System Admin account exists in SQLite, OR
-    - Valid BOOTSTRAP_SECRET_KEY / ADMIN_BOOTSTRAP_SECRET is provided.
-    """
-    validate_password_policy(req.password)
-    configured_secret = os.environ.get("BOOTSTRAP_SECRET_KEY") or os.environ.get("ADMIN_BOOTSTRAP_SECRET")
-    secret_matches = False
-    if configured_secret and (req.secret_key == configured_secret or x_bootstrap_secret == configured_secret):
-        secret_matches = True
+def bootstrap_admin(authorization: Optional[str] = Header(None), x_bootstrap_secret: Optional[str] = Header(None)):
+    """One-time bootstrap requires both a verified Firebase identity and backend-only secret."""
+    configured_secret = os.environ.get("ADMIN_BOOTSTRAP_SECRET")
+    if not configured_secret or not x_bootstrap_secret or not secrets.compare_digest(x_bootstrap_secret, configured_secret):
+        raise HTTPException(status_code=403, detail="Valid server bootstrap secret required.")
+    if not authorization or not authorization.lower().startswith("bearer "):
+        raise HTTPException(status_code=401, detail="Verified Firebase identity required.")
+    from app.core.firebase_auth import verify_firebase_id_token
+    try:
+        claims = verify_firebase_id_token(authorization.split(" ", 1)[1])
+    except Exception:
+        raise HTTPException(status_code=401, detail="Invalid Firebase session.")
+    email = str(claims.get("email", "")).strip().lower()
+    uid = str(claims.get("uid", ""))
+    if not uid or not claims.get("email_verified") or not email or not is_approved_institutional_email(email):
+        raise HTTPException(status_code=403, detail="Use a verified institutional Firebase account to bootstrap.")
 
     with get_db() as conn:
-        admin_row = conn.execute(
-            "SELECT id FROM users WHERE role = 'admin' AND is_active = 1"
-        ).fetchone()
-
-        if admin_row and not secret_matches:
-            raise HTTPException(
-                status_code=403,
-                detail="A System Admin is already configured. Use authorized admin session or provide valid bootstrap secret."
-            )
-
-        existing_user = conn.execute("SELECT id FROM users WHERE email = ?", (req.email,)).fetchone()
-        hashed_pwd = hash_password(req.password)
-
+        conn.execute("BEGIN IMMEDIATE")
+        if conn.execute("SELECT id FROM system_bootstrap WHERE id = 1").fetchone() or conn.execute("SELECT id FROM users WHERE role='admin' AND is_active=1").fetchone():
+            raise HTTPException(status_code=409, detail="System Admin bootstrap has already been completed.")
+        existing_user = conn.execute("SELECT * FROM users WHERE email = ?", (email,)).fetchone()
         if existing_user:
+            if existing_user["firebase_uid"] and existing_user["firebase_uid"] != uid:
+                raise HTTPException(status_code=409, detail="This email is linked to another Firebase account.")
             conn.execute(
                 """
                 UPDATE users
-                SET role = 'admin', hashed_password = ?, full_name = ?, status = 'active', is_active = 1, is_verified = 1
+                SET role = 'admin', firebase_uid = ?, status = 'active', is_active = 1, is_verified = 1
                 WHERE email = ?
                 """,
-                (hashed_pwd, req.full_name, req.email)
+                (uid, email)
             )
             user_id = existing_user["id"]
         else:
-            user_id = f"usr-{uuid.uuid4().hex[:12]}"
+            user_id = uid
             conn.execute(
                 """
-                INSERT INTO users (id, email, hashed_password, full_name, role, status, is_active, is_verified)
-                VALUES (?, ?, ?, ?, 'admin', 'active', 1, 1)
+                INSERT INTO users (id, email, hashed_password, full_name, role, status, is_active, is_verified, firebase_uid)
+                VALUES (?, ?, 'firebase-managed', ?, 'admin', 'active', 1, 1, ?)
                 """,
-                (user_id, req.email, hashed_pwd, req.full_name)
+                (user_id, email, str(claims.get("name") or email.split("@")[0]), uid)
             )
 
         record_audit_log(
-            conn, action="admin_bootstrapped", actor_email=req.email, target_user_id=user_id,
-            details={"email": req.email, "promoted": bool(existing_user)}
+            conn, action="admin_bootstrapped", actor_id=uid, actor_email=email, target_user_id=user_id,
+            details={"email": email, "promoted": bool(existing_user)}
         )
+        conn.execute("INSERT INTO system_bootstrap (id, completed_at, admin_user_id, admin_firebase_uid) VALUES (1, ?, ?, ?)", (datetime.now(timezone.utc).isoformat(), user_id, uid))
 
     return {
         "success": True,
         "message": "Initial System Admin configured successfully.",
         "user": {
             "id": user_id,
-            "email": req.email,
-            "full_name": req.full_name,
+            "email": email,
+            "full_name": str(claims.get("name") or email.split("@")[0]),
             "role": "admin"
         }
     }
@@ -355,57 +459,39 @@ def list_users(current_admin: Dict[str, Any] = Depends(require_role(["admin"])))
             "SELECT id, email, full_name, role, status, is_active, is_verified, created_at FROM users ORDER BY created_at DESC"
         ).fetchall()
         users = [dict(r) for r in rows]
-        return {"success": True, "users": users}
+        invitations = conn.execute("SELECT id,email,role,expires_at,used_at,revoked_at,created_at FROM user_invitations ORDER BY created_at DESC").fetchall()
+        return {"success": True, "users": users, "invitations": [dict(r) for r in invitations]}
 
 
-@router.post("/users")
-def admin_create_user(
-    req: AdminCreateUserRequest,
+@router.post("/users/invitations")
+def admin_create_invitation(
+    req: CreateInvitationRequest,
     current_admin: Dict[str, Any] = Depends(require_role(["admin"]))
 ):
-    """
-    System Admin creates an individual user account with any assigned role.
-    Securely hashes password and validates unique email.
-    """
-    validate_password_policy(req.password)
-
+    """Creates a one-time invitation and returns its secret link exactly once for delivery."""
+    if req.role not in VALID_ROLES:
+        raise HTTPException(status_code=422, detail="Invalid invitation role.")
+    if req.role in {"reviewer", "approver", "template_admin", "admin"} and not req.confirm_privileged:
+        raise HTTPException(status_code=400, detail="Explicit confirmation is required for privileged invitations.")
+    token = secrets.token_urlsafe(32)
+    now = datetime.now(timezone.utc)
+    expires_at = now + timedelta(hours=req.expires_in_hours)
+    invitation_id = str(uuid.uuid4())
     with get_db() as conn:
-        existing = conn.execute("SELECT id FROM users WHERE email = ?", (req.email,)).fetchone()
-        if existing:
-            raise HTTPException(status_code=400, detail=f"User with email '{req.email}' already exists.")
-
-        user_id = f"usr-{uuid.uuid4().hex[:12]}"
-        hashed_pwd = hash_password(req.password)
-        is_act = 1 if req.status == "active" else 0
-        is_ver = 1 if req.is_verified else 0
-
+        conn.execute("BEGIN IMMEDIATE")
+        conn.execute("UPDATE user_invitations SET revoked_at=? WHERE email=? AND used_at IS NULL AND revoked_at IS NULL", (now.isoformat(), req.email))
         conn.execute(
-            """
-            INSERT INTO users (id, email, hashed_password, full_name, role, status, is_active, is_verified)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (user_id, req.email, hashed_pwd, req.full_name, req.role, req.status, is_act, is_ver)
+            "INSERT INTO user_invitations (id,email,role,token_hash,expires_at,created_by) VALUES (?,?,?,?,?,?)",
+            (invitation_id, req.email, req.role, hashlib.sha256(token.encode("utf-8")).hexdigest(), expires_at.isoformat(), current_admin.get("sub")),
         )
-
         record_audit_log(
-            conn, action="user_created_by_admin", actor_id=current_admin.get("sub"),
-            actor_email=current_admin.get("email"), target_user_id=user_id,
-            details={"email": req.email, "role": req.role, "status": req.status}
+            conn, action="invitation_created", actor_id=current_admin.get("sub"),
+            actor_email=current_admin.get("email"), target_user_id=invitation_id,
+            details={"email": req.email, "role": req.role, "expires_at": expires_at.isoformat()}
         )
-
-    return {
-        "success": True,
-        "message": f"User '{req.full_name}' created successfully with role '{req.role}'.",
-        "user": {
-            "id": user_id,
-            "email": req.email,
-            "full_name": req.full_name,
-            "role": req.role,
-            "status": req.status,
-            "is_active": is_act,
-            "is_verified": is_ver
-        }
-    }
+    app_url = os.getenv("PUBLIC_APP_URL", "https://smart-document-generator-acm-svnit.vercel.app").rstrip("/")
+    return {"success": True, "invitation_id": invitation_id, "email": req.email, "role": req.role,
+            "expires_at": expires_at.isoformat(), "invitation_url": f"{app_url}/#invite={token}"}
 
 
 @router.put("/users/{user_id}/role")
@@ -415,25 +501,16 @@ def admin_update_user_role(
     current_admin: Dict[str, Any] = Depends(require_role(["admin"]))
 ):
     """
-    System Admin updates another user's assigned role.
-    Prevents self-demotion if caller is the only active admin.
+    System Admin changes another user's database-authoritative role.
     """
     with get_db() as conn:
         target_user = conn.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
         if not target_user:
             raise HTTPException(status_code=404, detail=f"User with ID '{user_id}' not found.")
-
-        # Guard: If current admin is demoting themselves, ensure another active admin remains
-        if current_admin.get("sub") == user_id and req.role != "admin":
-            other_admins = conn.execute(
-                "SELECT COUNT(*) as count FROM users WHERE role = 'admin' AND is_active = 1 AND id != ?",
-                (user_id,)
-            ).fetchone()
-            if other_admins["count"] == 0:
-                raise HTTPException(
-                    status_code=400,
-                    detail="Cannot remove admin role: System requires at least one active System Admin."
-                )
+        if current_admin.get("sub") == user_id and req.role != target_user["role"]:
+            raise HTTPException(status_code=400, detail="Administrators cannot change their own role.")
+        if req.role in {"admin", "template_admin", "approver", "reviewer"} and not req.confirm_privileged_change:
+            raise HTTPException(status_code=400, detail="Explicit confirmation is required for privileged role changes.")
 
         conn.execute("UPDATE users SET role = ? WHERE id = ?", (req.role, user_id))
 
@@ -491,6 +568,20 @@ def admin_update_user_status(
         "status": req.status,
         "is_active": is_act
     }
+
+
+@router.post("/users/invitations/{invitation_id}/revoke")
+def revoke_invitation(invitation_id: str, current_admin: Dict[str, Any] = Depends(require_role(["admin"]))):
+    now = datetime.now(timezone.utc).isoformat()
+    with get_db() as conn:
+        invitation = conn.execute("SELECT id,used_at,revoked_at FROM user_invitations WHERE id=?", (invitation_id,)).fetchone()
+        if not invitation:
+            raise HTTPException(status_code=404, detail="Invitation not found.")
+        if invitation["used_at"] or invitation["revoked_at"]:
+            raise HTTPException(status_code=409, detail="Invitation is already used or revoked.")
+        conn.execute("UPDATE user_invitations SET revoked_at=? WHERE id=?", (now, invitation_id))
+        record_audit_log(conn, action="invitation_revoked", actor_id=current_admin.get("sub"), actor_email=current_admin.get("email"), target_user_id=invitation_id)
+    return {"success": True, "invitation_id": invitation_id, "revoked_at": now}
 
 
 @router.delete("/users/{user_id}")

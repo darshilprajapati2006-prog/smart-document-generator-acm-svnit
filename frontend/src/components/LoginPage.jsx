@@ -1,16 +1,20 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { firebaseAuth } from "../services/firebase";
 import { reload, sendEmailVerification, signOut } from "firebase/auth";
 import {
   loginUser,
   registerUser,
   forgotPassword,
+  validateInvitation,
 } from "../services/documentApi";
 import { isApprovedInstitutionalEmail } from "../utils/institutionalEmail";
 
 export default function LoginPage({ onLoginSuccess }) {
+  const invitationToken = new URLSearchParams(window.location.hash.slice(1)).get("invite") || "";
+  const publicRoles = (import.meta.env.VITE_PUBLIC_REGISTRATION_ROLES || "author,viewer").split(",").map((role) => role.trim());
+  const [invitation, setInvitation] = useState(null);
+  const [view, setView] = useState(invitationToken ? "signup" : "signin");
   // Views: sign in, signup, verification notice, and password recovery.
-  const [view, setView] = useState("signin");
 
   // Sign In State
   const [loginEmail, setLoginEmail] = useState("");
@@ -31,6 +35,15 @@ export default function LoginPage({ onLoginSuccess }) {
   const [loading, setLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
   const [successMessage, setSuccessMessage] = useState("");
+
+  useEffect(() => {
+    if (!invitationToken) return;
+    validateInvitation(invitationToken).then((data) => {
+      setInvitation(data);
+      setRegisterRole(data.role);
+      setRegisterEmail(data.email);
+    }).catch((err) => setErrorMessage(err.message));
+  }, [invitationToken]);
 
   function resetFeedback() {
     setErrorMessage("");
@@ -115,6 +128,7 @@ export default function LoginPage({ onLoginSuccess }) {
         email: registerEmail.trim(),
         password: registerPassword,
         confirm_password: confirmPassword,
+        invitation_token: invitationToken || undefined,
       });
 
       if (data && data.success) {
@@ -213,9 +227,11 @@ export default function LoginPage({ onLoginSuccess }) {
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
-        background: "linear-gradient(135deg, #0f172a 0%, #1e1b4b 50%, #0f172a 100%)",
+        background:
+          "linear-gradient(135deg, #0f172a 0%, #1e1b4b 50%, #0f172a 100%)",
         padding: "20px",
-        fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
+        fontFamily:
+          "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
       }}
     >
       <div
@@ -327,7 +343,10 @@ export default function LoginPage({ onLoginSuccess }) {
         {/* VIEW 1: SIGN IN (Default)                                 */}
         {/* ========================================================= */}
         {view === "signin" && (
-          <form onSubmit={handleLoginSubmit} style={{ padding: "12px 32px 28px" }}>
+          <form
+            onSubmit={handleLoginSubmit}
+            style={{ padding: "12px 32px 28px" }}
+          >
             <div style={{ marginBottom: "18px" }}>
               <label
                 htmlFor="login-email"
@@ -346,7 +365,7 @@ export default function LoginPage({ onLoginSuccess }) {
                 type="email"
                 value={loginEmail}
                 onChange={(e) => setLoginEmail(e.target.value)}
-                placeholder="name@svnit.acm.org"
+                placeholder="rollnumber@dept.svnit.ac.in"
                 required
                 autoComplete="email"
                 style={{
@@ -364,7 +383,13 @@ export default function LoginPage({ onLoginSuccess }) {
             </div>
 
             <div style={{ marginBottom: "12px" }}>
-              <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "6px" }}>
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  marginBottom: "6px",
+                }}
+              >
                 <label
                   htmlFor="login-password"
                   style={{
@@ -417,7 +442,9 @@ export default function LoginPage({ onLoginSuccess }) {
                 <button
                   type="button"
                   onClick={() => setShowLoginPassword(!showLoginPassword)}
-                  aria-label={showLoginPassword ? "Hide password" : "Show password"}
+                  aria-label={
+                    showLoginPassword ? "Hide password" : "Show password"
+                  }
                   style={{
                     position: "absolute",
                     right: "10px",
@@ -489,17 +516,80 @@ export default function LoginPage({ onLoginSuccess }) {
         {/* VIEW 2: SIGN UP                                           */}
         {/* ========================================================= */}
         {view === "signup" && (
-          <form onSubmit={handleRegisterSubmit} style={{ padding: "12px 32px 28px" }}>
+          <form
+            onSubmit={handleRegisterSubmit}
+            style={{ padding: "12px 32px 28px" }}
+          >
             <div style={{ marginBottom: "16px" }}>
-              <label htmlFor="reg-role" style={{ display: "block", marginBottom: "6px", color: "#cbd5e1", fontSize: "0.82rem", fontWeight: 600 }}>Role</label>
-              <select id="reg-role" value={registerRole} onChange={(e) => setRegisterRole(e.target.value)} required style={{ width: "100%", padding: "11px 14px", borderRadius: "8px", border: "1px solid rgba(255,255,255,.15)", background: "#0f172a", color: "#fff", fontSize: ".9rem" }}>
-                <option value="author">Author</option>
-                <option value="reviewer" disabled>Reviewer — administrator approval required</option>
-                <option value="approver" disabled>Approver — administrator approval required</option>
-                <option value="template_admin" disabled>Template Admin — administrator approval required</option>
-                <option value="admin" disabled>System Admin — administrator approval required</option>
-                <option value="viewer" disabled>Viewer — administrator approval required</option>
+              <label
+                htmlFor="reg-role"
+                style={{
+                  display: "block",
+                  marginBottom: "6px",
+                  color: "#cbd5e1",
+                  fontSize: "0.82rem",
+                  fontWeight: 600,
+                }}
+              >
+                Role
+              </label>
+              <select
+                id="reg-role"
+                value={registerRole}
+                onChange={(e) => setRegisterRole(e.target.value)}
+                required
+                disabled={Boolean(invitationToken)}
+                style={{
+                  width: "100%",
+                  padding: "11px 14px",
+                  borderRadius: "8px",
+                  border: "1px solid rgba(255,255,255,.15)",
+                  background: "#0f172a",
+                  color: "#fff",
+                  fontSize: ".9rem",
+                }}
+              >
+                <option value="author" disabled={!invitationToken && !publicRoles.includes("author")}>Author</option>
+                <option value="viewer" disabled={!invitationToken && !publicRoles.includes("viewer")}>Viewer</option>
+                {invitation &&
+                  !["author", "viewer"].includes(invitation.role) && (
+                    <option value={invitation.role}>
+                      {invitation.role.replaceAll("_", " ")}
+                    </option>
+                  )}
+                <option value="reviewer" disabled>
+                  Reviewer — Invitation required
+                </option>
+                <option value="approver" disabled>
+                  Approver — Invitation required
+                </option>
+                <option value="template_admin" disabled>
+                  Template Admin — Invitation required
+                </option>
+                <option value="admin" disabled>
+                  System Admin — Invitation required
+                </option>
               </select>
+              {!invitationToken && (
+                <small style={{ display: "block", marginTop: 6, color: "#94a3b8" }}>
+                  Invitation required. Contact your administrator for Reviewer, Approver, Template Admin, or System Admin access.
+                </small>
+              )}
+              {invitationToken ? (
+                <small
+                  style={{ display: "block", marginTop: 6, color: "#94a3b8" }}
+                >
+                  {invitation
+                    ? `Invitation for ${invitation.role.replace("_", " ")} · ${invitation.email}`
+                    : "Checking administrator invitation…"}
+                </small>
+              ) : registerRole !== "author" && registerRole !== "viewer" ? (
+                <small
+                  style={{ display: "block", marginTop: 6, color: "#94a3b8" }}
+                >
+                  Invitation required. Contact your administrator.
+                </small>
+              ) : null}
             </div>
             <div style={{ marginBottom: "16px" }}>
               <label
@@ -553,6 +643,7 @@ export default function LoginPage({ onLoginSuccess }) {
                 type="email"
                 value={registerEmail}
                 onChange={(e) => setRegisterEmail(e.target.value)}
+                readOnly={Boolean(invitationToken)}
                 placeholder="name@svnit.acm.org"
                 required
                 style={{
@@ -674,7 +765,9 @@ export default function LoginPage({ onLoginSuccess }) {
                 boxShadow: "0 4px 12px rgba(2, 132, 199, 0.35)",
               }}
             >
-              {loading ? "Creating Account..." : "Register Institutional Account"}
+              {loading
+                ? "Creating Account..."
+                : "Register Institutional Account"}
             </button>
 
             <div
@@ -710,16 +803,63 @@ export default function LoginPage({ onLoginSuccess }) {
         {view === "verify_email" && (
           <div style={{ padding: "24px 32px 32px", textAlign: "center" }}>
             <div style={{ fontSize: "2rem", marginBottom: "8px" }}>📧</div>
-            <h3 style={{ color: "#fff", margin: "0 0 10px" }}>Check your inbox</h3>
+            <h3 style={{ color: "#fff", margin: "0 0 10px" }}>
+              Check your inbox
+            </h3>
             <p style={{ color: "#cbd5e1", lineHeight: 1.6 }}>
-              We sent a verification link to <strong>{activeEmail}</strong>. Open that link, then return here to sign in.
+              We sent a verification link to <strong>{activeEmail}</strong>.
+              Open that link, then return here to sign in.
             </p>
-            {errorMessage && <p role="alert" style={{ color: "#fca5a5" }}>{errorMessage}</p>}
-            <button type="button" onClick={handleVerifyEmailOtp} disabled={loading} style={{ width: "100%", padding: 12, border: 0, borderRadius: 8, color: "white", background: "linear-gradient(135deg,#0284c7,#2563eb)", cursor: "pointer" }}>
+            {errorMessage && (
+              <p role="alert" style={{ color: "#fca5a5" }}>
+                {errorMessage}
+              </p>
+            )}
+            <button
+              type="button"
+              onClick={handleVerifyEmailOtp}
+              disabled={loading}
+              style={{
+                width: "100%",
+                padding: 12,
+                border: 0,
+                borderRadius: 8,
+                color: "white",
+                background: "linear-gradient(135deg,#0284c7,#2563eb)",
+                cursor: "pointer",
+              }}
+            >
               {loading ? "Checking…" : "I've verified my email"}
             </button>
-            <button type="button" onClick={handleResendVerificationLink} disabled={loading} style={{ marginTop: 16, background: "none", border: 0, color: "#38bdf8", cursor: "pointer" }}>Resend verification link</button>
-            <div><button type="button" onClick={() => switchView("signin")} style={{ marginTop: 14, background: "none", border: 0, color: "#94a3b8", cursor: "pointer" }}>Back to Sign In</button></div>
+            <button
+              type="button"
+              onClick={handleResendVerificationLink}
+              disabled={loading}
+              style={{
+                marginTop: 16,
+                background: "none",
+                border: 0,
+                color: "#38bdf8",
+                cursor: "pointer",
+              }}
+            >
+              Resend verification link
+            </button>
+            <div>
+              <button
+                type="button"
+                onClick={() => switchView("signin")}
+                style={{
+                  marginTop: 14,
+                  background: "none",
+                  border: 0,
+                  color: "#94a3b8",
+                  cursor: "pointer",
+                }}
+              >
+                Back to Sign In
+              </button>
+            </div>
           </div>
         )}
 
@@ -727,14 +867,24 @@ export default function LoginPage({ onLoginSuccess }) {
         {/* VIEW 5: FORGOT PASSWORD                                   */}
         {/* ========================================================= */}
         {view === "forgot" && (
-          <form onSubmit={handleForgotPasswordSubmit} style={{ padding: "12px 32px 28px" }}>
+          <form
+            onSubmit={handleForgotPasswordSubmit}
+            style={{ padding: "12px 32px 28px" }}
+          >
             <div style={{ textAlign: "center", marginBottom: "18px" }}>
               <div style={{ fontSize: "2rem", marginBottom: "8px" }}>🔑</div>
-              <h3 style={{ margin: "0 0 6px 0", color: "#ffffff", fontSize: "1.15rem" }}>
+              <h3
+                style={{
+                  margin: "0 0 6px 0",
+                  color: "#ffffff",
+                  fontSize: "1.15rem",
+                }}
+              >
                 Account Recovery
               </h3>
               <p style={{ margin: 0, color: "#94a3b8", fontSize: "0.82rem" }}>
-              Enter your institutional email and we’ll send a secure password reset link.
+                Enter your institutional email and we’ll send a secure password
+                reset link.
               </p>
             </div>
 
@@ -812,8 +962,6 @@ export default function LoginPage({ onLoginSuccess }) {
           </form>
         )}
 
-
-
         {/* Footer Note */}
         <div
           style={{
@@ -830,7 +978,7 @@ export default function LoginPage({ onLoginSuccess }) {
               color: "#64748b",
             }}
           >
-              🔒 Secure sign-in · ACM SVNIT
+            🔒 Secure sign-in · ACM SVNIT
           </p>
         </div>
       </div>
