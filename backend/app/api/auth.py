@@ -1,13 +1,9 @@
 """
 Authentication and User Management Routes for SmartDocs SVNIT.
 Implements:
-1. Public registration with email verification OTP.
-2. Two-Factor Authentication (OTP on Login).
-3. Forgot Password & Password Reset via OTP.
-4. Cryptographic password hashing (PBKDF2-HMAC-SHA256).
-5. Secure bootstrap of initial System Admin.
-6. Role-Based Access Control and System Admin user management.
-7. Security audit logging.
+1. Firebase email/password authentication and email verification.
+2. Server-side role-based access control and user administration.
+3. Initial System Admin bootstrap and security audit logging.
 """
 import os
 import re
@@ -19,24 +15,9 @@ from pydantic import BaseModel, Field, field_validator
 from app.db.database import get_db
 from app.core.security import (
     hash_password,
-    verify_password,
-    create_access_token,
     require_authenticated_user,
     require_role,
     get_current_user
-)
-from app.services.email_service import (
-    send_signup_otp_email,
-    send_login_otp_email,
-    send_password_reset_otp_email,
-)
-from app.services.otp_service import (
-    issue_otp_challenge,
-    verify_otp_challenge,
-    OTPCooldownError,
-    OTPExpiredError,
-    OTPAttemptsExceededError,
-    OTPInvalidError
 )
 from app.services.audit_service import record_audit_log
 
@@ -45,18 +26,6 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 EMAIL_PATTERN = re.compile(r"^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$")
 VALID_ROLES = ["viewer", "author", "reviewer", "approver", "template_admin", "admin"]
 PUBLIC_ROLES = {"author"}
-
-def mask_email(email: str) -> str:
-    """Masks an email for safe display (e.g. j***@svnit.acm.org)."""
-    parts = email.split("@")
-    if len(parts) != 2:
-        return email
-    name, domain = parts
-    if len(name) <= 2:
-        masked_name = name[0] + "***"
-    else:
-        masked_name = name[0] + "***" + name[-1]
-    return f"{masked_name}@{domain}"
 
 def validate_password_policy(password: str) -> None:
     """Enforces appropriate institutional password policy."""
@@ -90,8 +59,6 @@ def is_approved_institutional_email(email: str) -> bool:
     allowed_env = os.getenv("ALLOWED_EMAIL_DOMAINS", "").strip()
     if allowed_env:
         allowed_list = [d.strip().lower() for d in allowed_env.split(",") if d.strip()]
-        if "*" in allowed_list:
-            return True
         domain = email.lower().split("@")[-1]
         for allowed in allowed_list:
             if domain == allowed or domain.endswith("." + allowed):
@@ -115,33 +82,10 @@ def is_approved_institutional_email(email: str) -> bool:
 # REQUEST & RESPONSE SCHEMAS
 # ============================================================
 
-class UserLoginRequest(BaseModel):
-    email: str
-    password: str
-
-    @field_validator("email")
-    @classmethod
-    def validate_email(cls, v):
-        if not EMAIL_PATTERN.match(v.strip()):
-            raise ValueError(f"Invalid email address format: '{v}'")
-        return v.strip().lower()
-
-
-class VerifyLoginOtpRequest(BaseModel):
-    challenge_id: str
-    otp: str = Field(min_length=6, max_length=6)
-
-
-class ResendLoginOtpRequest(BaseModel):
-    challenge_id: str
-
-
 class UserRegisterRequest(BaseModel):
     role: str = "author"
     full_name: str = Field(min_length=2, description="Full Name")
     email: str = Field(description="Institutional Email Address")
-    password: str = Field(min_length=8, description="Password (min 8 chars)")
-    confirm_password: str = Field(min_length=8, description="Confirm Password")
 
     @field_validator("role")
     @classmethod
@@ -159,54 +103,6 @@ class UserRegisterRequest(BaseModel):
         if not is_approved_institutional_email(cleaned):
             raise ValueError("Use an SVNIT institutional email address.")
         return cleaned
-
-
-class VerifyEmailOtpRequest(BaseModel):
-    email: str
-    otp: str = Field(min_length=6, max_length=6)
-
-    @field_validator("email")
-    @classmethod
-    def validate_email(cls, v):
-        if not EMAIL_PATTERN.match(v.strip()):
-            raise ValueError("Enter a valid email address.")
-        return v.strip().lower()
-
-
-class ResendEmailOtpRequest(BaseModel):
-    email: str
-
-    @field_validator("email")
-    @classmethod
-    def validate_email(cls, v):
-        if not EMAIL_PATTERN.match(v.strip()):
-            raise ValueError("Enter a valid email address.")
-        return v.strip().lower()
-
-
-class ForgotPasswordRequest(BaseModel):
-    email: str
-
-    @field_validator("email")
-    @classmethod
-    def validate_email(cls, v):
-        if not EMAIL_PATTERN.match(v.strip()):
-            raise ValueError("Enter a valid email address.")
-        return v.strip().lower()
-
-
-class ResetPasswordRequest(BaseModel):
-    email: str
-    otp: str = Field(min_length=6, max_length=6)
-    new_password: str = Field(min_length=8)
-    confirm_password: str = Field(min_length=8)
-
-    @field_validator("email")
-    @classmethod
-    def validate_email(cls, v):
-        if not EMAIL_PATTERN.match(v.strip()):
-            raise ValueError("Enter a valid email address.")
-        return v.strip().lower()
 
 
 class AdminCreateUserRequest(BaseModel):
@@ -273,358 +169,71 @@ class BootstrapAdminRequest(BaseModel):
 # ============================================================
 
 @router.post("/register")
-def register_user(request: UserRegisterRequest, req: Request):
-    """
-    Public registration endpoint.
-    - Public registration only permits roles explicitly allowed by PUBLIC_ROLES.
-    - Creates a pending account and dispatches an email verification OTP.
-    - Never returns the OTP in the API response.
-    """
-    # 1. Validate password match and policy
-    if request.password != request.confirm_password:
-        raise HTTPException(status_code=400, detail="Password and Confirm Password do not match.")
-    validate_password_policy(request.password)
-
-    client_ip = req.client.host if req.client else None
+def register_user(request: UserRegisterRequest, authorization: Optional[str] = Header(None)):
+    """Creates a pending Author profile for a Firebase-authenticated signup."""
+    if request.role != "author":
+        raise HTTPException(status_code=403, detail="Public registration is limited to Author accounts.")
+    if not authorization or not authorization.lower().startswith("bearer "):
+        raise HTTPException(status_code=401, detail="Firebase authentication required.")
+    from app.core.firebase_auth import verify_firebase_id_token
+    try:
+        claims = verify_firebase_id_token(authorization.split(" ", 1)[1])
+    except Exception:
+        raise HTTPException(status_code=401, detail="Invalid Firebase session.")
+    email = str(claims.get("email", "")).strip().lower()
+    if not claims.get("uid") or email != request.email.strip().lower():
+        raise HTTPException(status_code=403, detail="Use the same email address as your account.")
+    if not is_approved_institutional_email(email):
+        raise HTTPException(status_code=403, detail="Use an SVNIT institutional email address.")
 
     with get_db() as conn:
-        # Check duplicate email
-        existing = conn.execute("SELECT id, is_verified, status FROM users WHERE email = ?", (request.email,)).fetchone()
+        existing = conn.execute("SELECT * FROM users WHERE email = ?", (email,)).fetchone()
         if existing:
-            if existing["is_verified"] == 1:
-                raise HTTPException(status_code=400, detail="An account with this institutional email already exists. Please sign in.")
-            else:
-                # Existing unverified user: update details
-                user_id = existing["id"]
-                conn.execute(
-                    """
-                    UPDATE users
-                    SET full_name = ?, hashed_password = ?, status = ?, is_active = 1, is_verified = ?
-                    WHERE id = ?
-                    """,
-                    (
-                        request.full_name,
-                        hash_password(request.password),
-                        'pending_verification',
-                        0,
-                        user_id
-                    )
-                )
+            if existing["firebase_uid"] and existing["firebase_uid"] != claims["uid"]:
+                raise HTTPException(status_code=409, detail="An account already exists for this email. Contact an administrator.")
+            if existing["role"] != "author":
+                raise HTTPException(status_code=409, detail="An account already exists for this email. Contact an administrator.")
+            # Never claim even an Author profile until Firebase confirms mailbox ownership.
+            if not claims.get("email_verified"):
+                raise HTTPException(status_code=403, detail="Verify your email address before completing registration.")
+            conn.execute("UPDATE users SET firebase_uid = ? WHERE id = ?", (claims["uid"], existing["id"]))
         else:
-            user_id = f"usr-{uuid.uuid4().hex[:12]}"
             conn.execute(
-                """
-                INSERT INTO users (id, email, hashed_password, full_name, role, status, is_active, is_verified)
-                VALUES (?, ?, ?, ?, ?, ?, 1, 0)
-                """,
-                (
-                    user_id,
-                    request.email,
-                    hash_password(request.password),
-                    request.full_name,
-                    request.role,
-                    'pending_verification'
-                )
+                "INSERT INTO users (id,email,hashed_password,full_name,role,status,is_active,is_verified,firebase_uid) VALUES (?,?,?,?,?,'pending_verification',1,0,?)",
+                (claims["uid"], email, "firebase-managed", request.full_name.strip(), "author", claims["uid"]),
             )
-
-        # 2. Issue OTP challenge
-        try:
-            raw_otp, challenge_id = issue_otp_challenge(
-                conn, email=request.email, purpose="signup_verification", user_id=user_id,
-                expiry_minutes=5
-            )
-        except OTPCooldownError as ce:
-            raise HTTPException(status_code=429, detail=str(ce))
-
-        # 3. Dispatch branded verification email
-        email_sent = send_signup_otp_email(request.email, request.full_name, raw_otp, expires_minutes=5)
-        if not email_sent:
-            conn.rollback()
-            raise HTTPException(
-                status_code=502,
-                detail="We couldn't send your verification code. Please try again later or contact the administrator."
-            )
-
-        # 4. Audit Log
-        record_audit_log(
-            conn,
-            action="user_registered",
-            actor_email=request.email,
-            target_user_id=user_id,
-            details={"email": request.email, "role": "author"},
-            ip_address=client_ip
-        )
-
-    return {
-        "success": True,
-        "requires_otp": True,
-        "is_verified": False,
-        "message": f"Verification code sent to {mask_email(request.email)}. Please enter the 6-digit code to activate your account.",
-        "email": request.email,
-        "cooldown_seconds": 60
-    }
+    return {"success": True, "requires_email_verification": not bool(claims.get("email_verified")), "message": "Account created. Check your inbox for the verification link."}
 
 
-@router.post("/verify-email-otp")
-def verify_email_otp(request: VerifyEmailOtpRequest, req: Request):
-    """
-    Verifies the email verification OTP and activates the user account.
-    """
-    client_ip = req.client.host if req.client else None
-
+@router.post("/session")
+def create_firebase_session(authorization: Optional[str] = Header(None)):
+    """Links a verified Firebase identity to its DB profile and returns DB authorization data."""
+    if not authorization or not authorization.lower().startswith("bearer "):
+        raise HTTPException(status_code=401, detail="Firebase authentication required.")
+    from app.core.firebase_auth import verify_firebase_id_token
+    try:
+        claims = verify_firebase_id_token(authorization.split(" ", 1)[1])
+    except Exception:
+        raise HTTPException(status_code=401, detail="Invalid Firebase session.")
+    if not claims.get("email_verified") or not claims.get("email"):
+        raise HTTPException(status_code=403, detail="Please verify your email address before signing in.")
+    email = str(claims["email"]).strip().lower()
     with get_db() as conn:
-        try:
-            verified_email = verify_otp_challenge(
-                conn, email=request.email, purpose="signup_verification", otp=request.otp
-            )
-        except OTPCooldownError as ce:
-            raise HTTPException(status_code=429, detail=str(ce))
-        except (OTPExpiredError, OTPAttemptsExceededError, OTPInvalidError) as oe:
-            raise HTTPException(status_code=400, detail=str(oe))
-
-        # Activate the user
-        user = conn.execute("SELECT id FROM users WHERE email = ?", (verified_email,)).fetchone()
-        if not user:
-            raise HTTPException(status_code=404, detail="User account not found.")
-
-        conn.execute(
-            "UPDATE users SET status = 'active', is_active = 1, is_verified = 1 WHERE email = ?",
-            (verified_email,)
-        )
-
-        record_audit_log(
-            conn,
-            action="email_verified",
-            actor_email=verified_email,
-            target_user_id=user["id"],
-            details={"email": verified_email},
-            ip_address=client_ip
-        )
-
-    return {
-        "success": True,
-        "message": "Email address verified successfully! You may now sign in."
-    }
-
-
-@router.post("/resend-email-otp")
-def resend_email_otp(request: ResendEmailOtpRequest):
-    """
-    Re-issues a sign-up verification OTP subject to a 60-second cooldown.
-    """
-    with get_db() as conn:
-        user = conn.execute("SELECT id, full_name, is_verified FROM users WHERE email = ?", (request.email,)).fetchone()
-        if not user:
-            # Generic safe response to prevent enumeration
-            return {
-                "success": True,
-                "message": "If an eligible unverified account exists, a new code has been sent.",
-                "cooldown_seconds": 60
-            }
-
-        if user["is_verified"] == 1:
-            return {
-                "success": True,
-                "message": "This account is already verified. Please sign in.",
-                "already_verified": True
-            }
-
-        try:
-            raw_otp, challenge_id = issue_otp_challenge(
-                conn, email=request.email, purpose="signup_verification", user_id=user["id"]
-            )
-        except OTPCooldownError as ce:
-            raise HTTPException(status_code=429, detail=str(ce))
-
-        email_sent = send_signup_otp_email(request.email, user["full_name"], raw_otp)
-        if not email_sent:
-            raise HTTPException(
-                status_code=502,
-                detail="We couldn't send your verification code. Please try again later or contact the administrator."
-            )
-
-    return {
-        "success": True,
-        "message": f"A new verification code has been dispatched to {mask_email(request.email)}.",
-        "cooldown_seconds": 60
-    }
-
-
-# ============================================================
-# 2. SIGN-IN & LOGIN OTP 2FA (Requirements 4 & 5)
-# ============================================================
-
-@router.post("/login")
-def login_user(request: UserLoginRequest, req: Request):
-    """
-    User Sign In (Requirement 17):
-    - Code is required only during sign up.
-    - During sign in, only the correct password is required.
-    - Verifies PBKDF2-HMAC-SHA256 hashed password.
-    - Enforces account active and verified status.
-    - Returns a JWT after password verification, without an additional login OTP.
-    """
-    client_ip = req.client.host if req.client else None
-
-    with get_db() as conn:
-        user_row = conn.execute("SELECT * FROM users WHERE email = ?", (request.email,)).fetchone()
-        if not user_row:
-            record_audit_log(
-                conn, action="login_failed", actor_email=request.email,
-                details={"reason": "nonexistent_email"}, ip_address=client_ip
-            )
-            raise HTTPException(status_code=401, detail="Invalid email or password.")
-
-        # Check account deactivation
-        is_active = user_row["is_active"] if "is_active" in user_row.keys() else 1
-        status_val = user_row["status"] if "status" in user_row.keys() else "active"
-        if is_active == 0 or status_val == "inactive":
-            record_audit_log(
-                conn, action="login_blocked_inactive", actor_email=request.email,
-                target_user_id=user_row["id"], ip_address=client_ip
-            )
-            raise HTTPException(
-                status_code=403,
-                detail="Account is deactivated. Please contact the System Administrator."
-            )
-
-        # Verify password hash
-        if not verify_password(request.password, user_row["hashed_password"]):
-            record_audit_log(
-                conn, action="login_failed", actor_email=request.email,
-                target_user_id=user_row["id"], details={"reason": "bad_password"}, ip_address=client_ip
-            )
-            raise HTTPException(status_code=401, detail="Invalid email or password.")
-
-        # Check unverified account in production mode
-        is_verified = user_row["is_verified"] if "is_verified" in user_row.keys() else 1
-        if is_verified == 0 or status_val == "pending_verification":
-            raise HTTPException(
-                status_code=403,
-                detail="Your email address has not been verified yet. Please enter the verification code sent to your email during registration, or request a new code."
-            )
-
-        # Credentials valid: issue JWT access token directly
-        token = create_access_token(
-            user_row["id"],
-            user_row["email"],
-            user_row["role"],
-            user_row["full_name"]
-        )
-
-        record_audit_log(
-            conn,
-            action="login_success",
-            actor_email=request.email,
-            target_user_id=user_row["id"],
-            details={"auth_method": "password"},
-            ip_address=client_ip
-        )
-
-    return {
-        "success": True,
-        "access_token": token,
-        "token_type": "bearer",
-        "requires_otp": False,
-        "user": {
-            "id": user_row["id"],
-            "email": user_row["email"],
-            "full_name": user_row["full_name"],
-            "role": user_row["role"],
-            "status": status_val,
-            "is_verified": is_verified,
-        }
-    }
-
-
-@router.post("/verify-login-otp")
-def verify_login_otp(request: VerifyLoginOtpRequest, req: Request):
-    """
-    Step 2 of Authentication:
-    - Verifies the OTP submitted with the challenge_id.
-    - On success, establishes the authenticated session and returns JWT access token.
-    """
-    client_ip = req.client.host if req.client else None
-
-    with get_db() as conn:
-        try:
-            verified_email = verify_otp_challenge(
-                conn, email=None, purpose="login_2fa", otp=request.otp, challenge_id=request.challenge_id
-            )
-        except OTPCooldownError as ce:
-            raise HTTPException(status_code=429, detail=str(ce))
-        except (OTPExpiredError, OTPAttemptsExceededError, OTPInvalidError) as oe:
-            raise HTTPException(status_code=400, detail=str(oe))
-
-        user_row = conn.execute("SELECT * FROM users WHERE email = ?", (verified_email,)).fetchone()
-        if not user_row or user_row["is_active"] == 0:
-            raise HTTPException(status_code=403, detail="Account is deactivated.")
-
-        token = create_access_token(
-            user_row["id"],
-            user_row["email"],
-            user_row["role"],
-            user_row["full_name"]
-        )
-
-        record_audit_log(
-            conn,
-            action="login_success",
-            actor_email=verified_email,
-            target_user_id=user_row["id"],
-            details={"role": user_row["role"]},
-            ip_address=client_ip
-        )
-
-    return {
-        "success": True,
-        "user": {
-            "id": user_row["id"],
-            "email": user_row["email"],
-            "full_name": user_row["full_name"],
-            "role": user_row["role"],
-            "status": user_row["status"],
-            "is_active": user_row["is_active"],
-            "is_verified": user_row["is_verified"]
-        },
-        "access_token": token,
-        "token_type": "Bearer"
-    }
-
-
-@router.post("/resend-login-otp")
-def resend_login_otp(request: ResendLoginOtpRequest):
-    """
-    Resends login OTP challenge subject to 60-second cooldown.
-    """
-    with get_db() as conn:
-        row = conn.execute(
-            "SELECT email, user_id FROM auth_otps WHERE challenge_id = ? AND purpose = 'login_2fa' ORDER BY created_at DESC LIMIT 1",
-            (request.challenge_id,)
-        ).fetchone()
-
+        row = conn.execute("SELECT * FROM users WHERE firebase_uid = ? OR email = ?", (claims["uid"], email)).fetchone()
         if not row:
-            raise HTTPException(status_code=404, detail="Login challenge expired or not found.")
+            raise HTTPException(status_code=403, detail="No SmartDocs account found. Create an account first.")
+        if row["email"].strip().lower() != email:
+            raise HTTPException(status_code=403, detail="Firebase account email does not match the SmartDocs profile.")
+        if row["firebase_uid"] and row["firebase_uid"] != claims["uid"]:
+            raise HTTPException(status_code=403, detail="This email is linked to another account.")
+        if row["status"] == "inactive" or row["is_active"] == 0:
+            raise HTTPException(status_code=403, detail="Account is deactivated. Contact an administrator.")
+        conn.execute("UPDATE users SET firebase_uid = ?, is_verified = 1, status = 'active' WHERE id = ?", (claims["uid"], row["id"]))
+        return {"authenticated": True, "user": {"id": row["id"], "email": row["email"], "full_name": row["full_name"], "role": row["role"], "status": "active", "is_active": 1, "is_verified": 1}}
 
-        user_row = conn.execute("SELECT full_name FROM users WHERE email = ?", (row["email"],)).fetchone()
-        name = user_row["full_name"] if user_row else "SVNIT Member"
 
-        try:
-            raw_otp, new_challenge_id = issue_otp_challenge(
-                conn, email=row["email"], purpose="login_2fa", user_id=row["user_id"]
-            )
-        except OTPCooldownError as ce:
-            raise HTTPException(status_code=429, detail=str(ce))
-
-        send_login_otp_email(row["email"], name, raw_otp)
-
-    return {
-        "success": True,
-        "message": f"A new login code has been sent to {mask_email(row['email'])}.",
-        "challenge_id": new_challenge_id,
-        "cooldown_seconds": 60
-    }
-
+# Firebase sign-out occurs client side; this endpoint records an audit event.
+# ============================================================
 
 @router.post("/logout")
 def logout_user(
@@ -656,99 +265,6 @@ def get_current_user_profile(user: Dict[str, Any] = Depends(require_authenticate
             "is_active": user.get("is_active", 1),
             "is_verified": user.get("is_verified", 1)
         }
-    }
-
-
-# ============================================================
-# 3. FORGOT PASSWORD & PASSWORD RESET (Requirement 6)
-# ============================================================
-
-@router.get("/mode")
-def get_auth_mode():
-    """Reports whether institutional email verification is required."""
-    return {"email_verification_required": True}
-
-
-@router.post("/forgot-password")
-def forgot_password(request: ForgotPasswordRequest, req: Request):
-    """
-    Initiates password recovery.
-    Dispatches a time-limited OTP to the registered email address.
-    Protects against account enumeration through uniform messaging.
-    """
-    client_ip = req.client.host if req.client else None
-
-    with get_db() as conn:
-        user_row = conn.execute("SELECT id, full_name, is_active FROM users WHERE email = ?", (request.email,)).fetchone()
-        if user_row and user_row["is_active"] == 1 and user_row["is_verified"] == 1:
-            try:
-                raw_otp, challenge_id = issue_otp_challenge(
-                    conn, email=request.email, purpose="password_reset", user_id=user_row["id"]
-                )
-                sent = send_password_reset_otp_email(request.email, user_row["full_name"], raw_otp, expires_minutes=5)
-                if not sent:
-                    raise HTTPException(status_code=502, detail="We couldn't send your recovery code. Please try again later or contact the administrator.")
-                record_audit_log(
-                    conn, action="password_reset_requested", actor_email=request.email,
-                    target_user_id=user_row["id"], details={}, ip_address=client_ip
-                )
-            except OTPCooldownError as ce:
-                raise HTTPException(status_code=429, detail=str(ce))
-            except HTTPException:
-                raise
-            except Exception:
-                pass  # Preserve enumeration-resistant response for unknown accounts
-
-    msg = "If an eligible account exists, a recovery code has been sent."
-
-    return {
-        "success": True,
-        "message": msg,
-        "cooldown_seconds": 60
-    }
-
-
-@router.post("/reset-password")
-def reset_password(request: ResetPasswordRequest, req: Request):
-    """
-    Verifies the password recovery OTP and resets the user's password.
-    """
-    if request.new_password != request.confirm_password:
-        raise HTTPException(status_code=400, detail="New Password and Confirm Password do not match.")
-    validate_password_policy(request.new_password)
-
-    client_ip = req.client.host if req.client else None
-
-    with get_db() as conn:
-        verified_email = None
-        try:
-            verified_email = verify_otp_challenge(
-                conn, email=request.email, purpose="password_reset", otp=request.otp
-            )
-        except OTPCooldownError as ce:
-            raise HTTPException(status_code=429, detail=str(ce))
-        except (OTPExpiredError, OTPAttemptsExceededError, OTPInvalidError) as oe:
-            raise HTTPException(status_code=400, detail=str(oe))
-
-        user_row = conn.execute("SELECT id FROM users WHERE email = ?", (verified_email,)).fetchone()
-        if not user_row:
-            raise HTTPException(status_code=404, detail="User account not found.")
-
-        new_hash = hash_password(request.new_password)
-        conn.execute("UPDATE users SET hashed_password = ? WHERE id = ?", (new_hash, user_row["id"]))
-
-        record_audit_log(
-            conn,
-            action="password_reset_completed",
-            actor_email=verified_email,
-            target_user_id=user_row["id"],
-            details={},
-            ip_address=client_ip
-        )
-
-    return {
-        "success": True,
-        "message": "Password has been successfully updated. You may now sign in with your new password."
     }
 
 

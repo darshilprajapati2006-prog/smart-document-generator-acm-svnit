@@ -58,6 +58,11 @@ def init_db():
             conn.execute("ALTER TABLE users ADD COLUMN is_verified INTEGER DEFAULT 0")
         except Exception:
             pass
+        try:
+            conn.execute("ALTER TABLE users ADD COLUMN firebase_uid TEXT")
+        except Exception:
+            pass
+        conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_users_firebase_uid ON users(firebase_uid) WHERE firebase_uid IS NOT NULL")
 
         # 1b. Cryptographic OTP Verification Challenges
         conn.execute("""

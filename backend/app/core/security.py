@@ -114,21 +114,27 @@ def sign_data_payload(data: Dict[str, Any], signer_id: str) -> str:
     return hmac.new(SECRET_KEY.encode('utf-8'), to_sign, hashlib.sha256).hexdigest()
 
 def get_current_user(credentials: Optional[HTTPAuthorizationCredentials] = Security(security_bearer)) -> Optional[Dict[str, Any]]:
-    """Dependency that extracts user if authenticated and active, or None if anonymous."""
+    """Validates a Firebase ID token and loads the matching active, verified DB user."""
     if not credentials:
         return None
     token = credentials.credentials
-    user = decode_access_token(token)
-    if not user:
+    try:
+        from app.core.firebase_auth import verify_firebase_id_token
+        user = verify_firebase_id_token(token)
+    except Exception:
+        return None
+    if not user.get("email_verified"):
         return None
     try:
         from app.db.database import get_db
         with get_db() as conn:
             user_row = conn.execute(
-                "SELECT id, email, full_name, role, status, is_active, is_verified FROM users WHERE id = ?",
-                (user.get("sub"),)
+                "SELECT id, email, full_name, role, status, is_active, is_verified FROM users WHERE firebase_uid = ? OR (id = ? AND email = ?)",
+                (user.get("uid"), user.get("uid"), user.get("email"))
             ).fetchone()
             if not user_row or user_row["is_active"] == 0 or user_row["status"] == "inactive":
+                return None
+            if user_row["email"].strip().lower() != str(user.get("email", "")).strip().lower():
                 return None
             if user_row["is_verified"] == 0 or user_row["status"] == "pending_verification":
                 return None
@@ -142,21 +148,27 @@ def get_current_user(credentials: Optional[HTTPAuthorizationCredentials] = Secur
     return user
 
 def require_authenticated_user(credentials: Optional[HTTPAuthorizationCredentials] = Security(security_bearer)) -> Dict[str, Any]:
-    """Dependency enforcing authentication, active account status, and role integrity."""
+    """Verifies Firebase signature/issuer and enforces DB-backed role/status."""
     if not credentials:
         raise HTTPException(status_code=401, detail="Authentication credentials required.")
-    user = decode_access_token(credentials.credentials)
-    if not user:
+    from app.core.firebase_auth import verify_firebase_id_token
+    try:
+        user = verify_firebase_id_token(credentials.credentials)
+    except Exception:
         raise HTTPException(status_code=401, detail="Invalid or expired authentication token.")
+    if not user.get("email_verified") or not user.get("email"):
+        raise HTTPException(status_code=403, detail="Please verify your email address before signing in.")
     
     from app.db.database import get_db
     with get_db() as conn:
         user_row = conn.execute(
-            "SELECT id, email, full_name, role, status, is_active, is_verified FROM users WHERE id = ?",
-            (user.get("sub"),)
+            "SELECT id, email, full_name, role, status, is_active, is_verified FROM users WHERE firebase_uid = ? OR (id = ? AND email = ?)",
+            (user.get("uid"), user.get("uid"), user.get("email"))
         ).fetchone()
         if not user_row:
             raise HTTPException(status_code=401, detail="User account no longer exists.")
+        if user_row["email"].strip().lower() != str(user.get("email", "")).strip().lower():
+            raise HTTPException(status_code=403, detail="Firebase account email does not match the SmartDocs profile.")
         if user_row["is_active"] == 0 or user_row["status"] == "inactive":
             raise HTTPException(
                 status_code=403,
@@ -165,6 +177,7 @@ def require_authenticated_user(credentials: Optional[HTTPAuthorizationCredential
         if user_row["is_verified"] == 0 or user_row["status"] == "pending_verification":
             raise HTTPException(status_code=403, detail="Please verify your email address before signing in.")
         # Keep authenticated context strictly synchronized with active database record
+        user["sub"] = user_row["id"]
         user["role"] = user_row["role"]
         user["full_name"] = user_row["full_name"]
         user["status"] = user_row["status"]

@@ -1,18 +1,23 @@
+import { firebaseAuth, authReady } from "./firebase";
+import {
+  createUserWithEmailAndPassword,
+  updateProfile,
+  sendEmailVerification,
+  signInWithEmailAndPassword,
+  reload,
+  sendPasswordResetEmail,
+  signOut,
+} from "firebase/auth";
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://127.0.0.1:8000";
 
-let authToken = localStorage.getItem("acm_doc_token") || "";
+let authToken = "";
+if (typeof window !== "undefined") {
+  window.addEventListener("smartdocs-firebase-token", (event) => { authToken = event.detail; });
+}
 
 export function setAuthToken(token) {
   authToken = token;
-  if (token) {
-    localStorage.setItem("acm_doc_token", token);
-  } else {
-    localStorage.removeItem("acm_doc_token");
-  }
-}
-
-export function getAuthToken() {
-  return authToken;
+  // Firebase owns token persistence and refresh; keep only the active token in memory.
 }
 
 function getHeaders() {
@@ -267,116 +272,60 @@ export async function updateTemplateConfig(templateId, payload) {
 // -------------------------------------------------------------
 
 export async function loginUser(email, password) {
-  const res = await fetch(`${API_BASE_URL}/api/auth/login`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ email, password }),
+  await authReady;
+  const credential = await signInWithEmailAndPassword(firebaseAuth, email, password);
+  await reload(credential.user);
+  if (!credential.user.emailVerified) {
+    const error = new Error("Verify your email using the link we sent before signing in.");
+    error.code = "auth/email-not-verified";
+    throw error;
+  }
+  const token = await credential.user.getIdToken(true);
+  setAuthToken(token);
+  const res = await fetch(`${API_BASE_URL}/api/auth/session`, {
+    method: "POST", headers: { Authorization: `Bearer ${token}` },
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
+    await signOut(firebaseAuth);
     throw new Error(err.detail || "Authentication failed.");
   }
-  return res.json();
-}
-
-export async function verifyLoginOtp({ challenge_id, otp }) {
-  const res = await fetch(`${API_BASE_URL}/api/auth/verify-login-otp`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ challenge_id, otp }),
-  });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(err.detail || "Verification failed.");
-  }
   const data = await res.json();
-  if (data.access_token) {
-    setAuthToken(data.access_token);
-  }
-  return data;
-}
-
-export async function resendLoginOtp({ challenge_id }) {
-  const res = await fetch(`${API_BASE_URL}/api/auth/resend-login-otp`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ challenge_id }),
-  });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(err.detail || "Failed to resend code.");
-  }
-  return res.json();
+  return { access_token: token, user: data.user, requires_otp: false };
 }
 
 export async function registerUser({ role, full_name, email, password, confirm_password }) {
+  if (password !== confirm_password) throw new Error("Passwords do not match.");
+  if (role !== "author") throw new Error("Only Author registration is available.");
+  const credential = await createUserWithEmailAndPassword(firebaseAuth, email, password);
+  await updateProfile(credential.user, { displayName: full_name });
+  const token = await credential.user.getIdToken(true);
   const res = await fetch(`${API_BASE_URL}/api/auth/register`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ role, full_name, email, password, confirm_password }),
+    method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ role, full_name, email }),
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
+    await deleteUser(credential.user).catch(() => {});
     throw new Error(err.detail || "Registration failed.");
   }
-  return res.json();
-}
-
-export async function verifyEmailOtp({ email, otp }) {
-  const res = await fetch(`${API_BASE_URL}/api/auth/verify-email-otp`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ email, otp }),
-  });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(err.detail || "Verification failed.");
-  }
-  return res.json();
-}
-
-export async function resendEmailOtp({ email }) {
-  const res = await fetch(`${API_BASE_URL}/api/auth/resend-email-otp`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ email }),
-  });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(err.detail || "Failed to resend code.");
-  }
+  await sendEmailVerification(credential.user, { url: window.location.origin });
   return res.json();
 }
 
 export async function forgotPassword({ email }) {
-  const res = await fetch(`${API_BASE_URL}/api/auth/forgot-password`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ email }),
-  });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(err.detail || "Failed to process password recovery.");
-  }
-  return res.json();
-}
-
-export async function resetPassword({ email, otp, new_password, confirm_password }) {
-  const res = await fetch(`${API_BASE_URL}/api/auth/reset-password`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ email, otp, new_password, confirm_password }),
-  });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(err.detail || "Failed to reset password.");
-  }
-  return res.json();
+  await sendPasswordResetEmail(firebaseAuth, email);
+  return { success: true, message: "If an account exists, a password reset link has been sent." };
 }
 
 export async function fetchCurrentUserProfile() {
-  if (!authToken) return null;
-  const res = await fetch(`${API_BASE_URL}/api/auth/me`, { headers: getHeaders() });
+  await authReady;
+  const user = firebaseAuth.currentUser;
+  if (!user) return null;
+  await user.reload();
+  if (!user.emailVerified) return null;
+  authToken = await user.getIdToken(true);
+  const res = await fetch(`${API_BASE_URL}/api/auth/session`, { method: "POST", headers: getHeaders() });
   if (!res.ok) {
     if (res.status === 401 || res.status === 403) {
       setAuthToken("");
@@ -397,7 +346,9 @@ export async function logoutUser() {
     // ignore network errors on logout
   }
   setAuthToken("");
+  await signOut(firebaseAuth);
   localStorage.removeItem("acm_doc_user");
+  localStorage.removeItem("acm_doc_token");
 }
 
 export async function fetchUsers() {

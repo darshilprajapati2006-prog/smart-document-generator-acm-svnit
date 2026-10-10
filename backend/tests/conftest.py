@@ -1,17 +1,18 @@
-import os
 import pytest
-from app.services import email_service
+from app.core import firebase_auth
+from app.core.security import decode_access_token
+
+
+def _test_firebase_token(token):
+    payload = decode_access_token(token)
+    if payload:
+        return {"uid": payload["sub"], "email": payload["email"], "email_verified": True}
+    if isinstance(token, str) and token.startswith("test-firebase:"):
+        _, uid, email, verified = token.split(":", 3)
+        return {"uid": uid, "email": email, "email_verified": verified == "1"}
+    raise ValueError("invalid test Firebase token")
 
 @pytest.fixture(autouse=True)
-def configure_test_email_environment(monkeypatch, request):
-    """
-    Ensures general integration tests run against simulated in-memory email capture
-    so that tests with synthetic emails (e.g. author@svnit.acm.org) don't trigger
-    external HTTP calls or fail due to sandbox domain restrictions.
-    Specific email unit tests (e.g. test_email_service.py) explicitly set RESEND_API_KEY.
-    """
-    if "test_email_service" not in getattr(request.module, "__name__", ""):
-        monkeypatch.setenv("RESEND_API_KEY", "")
-        monkeypatch.setattr(email_service, "send_signup_otp_email", lambda *args, **kwargs: True)
-        monkeypatch.setattr(email_service, "send_password_reset_otp_email", lambda *args, **kwargs: True)
-        monkeypatch.setattr(email_service, "send_login_otp_email", lambda *args, **kwargs: True)
+def configure_test_firebase_environment(monkeypatch, request):
+    """Replace Firebase's network-backed verifier with deterministic test token fixtures."""
+    monkeypatch.setattr(firebase_auth, "verify_firebase_id_token", _test_firebase_token)

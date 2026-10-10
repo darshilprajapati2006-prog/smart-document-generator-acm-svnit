@@ -26,7 +26,11 @@ client = TestClient(app)
 
 # Helper tokens for testing roles
 def get_auth_header(role="author", user_id="usr-author-01", name="Test User"):
-    token = create_access_token(user_id, f"{role}@test.com", role, name)
+    from app.db.database import get_db
+    with get_db() as conn:
+        row = conn.execute("SELECT email,full_name FROM users WHERE id=?", (user_id,)).fetchone()
+    email = row["email"] if row else f"{role}@svnit.acm.org"
+    token = create_access_token(user_id, email, role, name)
     return {"Authorization": f"Bearer {token}"}
 
 # ============================================================
@@ -368,53 +372,18 @@ def test_template_preview_and_config():
 # ============================================================
 
 def test_rbac_register_login_and_role_protection():
-    from app.services.email_service import get_latest_sent_otp
-
-    # 1. Register new author
     email = f"testauthor_{uuid.uuid4().hex[:8]}@svnit.acm.org"
-    reg = client.post("/api/auth/register", json={
-        "email": email,
-        "password": "Password@123",
-        "confirm_password": "Password@123",
-        "full_name": "Test RBAC Author"
+    uid = f"uid-{uuid.uuid4().hex}"
+    headers = {"Authorization": f"Bearer test-firebase:{uid}:{email}:0"}
+    reg = client.post("/api/auth/register", headers=headers, json={
+        "role": "author", "full_name": "Test RBAC Author", "email": email,
     })
     assert reg.status_code == 200
-    assert reg.json()["success"] is True
-
-    # 2. Verify Email OTP to activate account
-    signup_otp = get_latest_sent_otp(email, "signup_verification")
-    assert signup_otp is not None, "Signup OTP must be dispatched"
-    verify_reg = client.post("/api/auth/verify-email-otp", json={
-        "email": email,
-        "otp": signup_otp
-    })
-    assert verify_reg.status_code == 200
-    assert verify_reg.json()["success"] is True
-
-    # 3. Login: Submit credentials to receive access token directly (Requirement 17)
-    login_res = client.post("/api/auth/login", json={
-        "email": email,
-        "password": "Password@123"
-    })
-    assert login_res.status_code == 200
-    assert login_res.json()["requires_otp"] is False
-    assert "access_token" in login_res.json()
-    token = login_res.json()["access_token"]
-
-    # 5. Check profile
-    me_res = client.get("/api/auth/me", headers={"Authorization": f"Bearer {token}"})
-    assert me_res.status_code == 200
-    assert me_res.json()["user"]["role"] == "author"
-
-    # 6. Author cannot modify protected template configuration (requires template_admin)
-    tmpl_res = client.put("/api/documents/templates-config/exec_meet", json={
-        "display_name": "Hacked Name"
-    }, headers={"Authorization": f"Bearer {token}"})
-    assert tmpl_res.status_code == 403
-
-# ============================================================
-# FEATURE 10: GOOGLE DRIVE & SHEETS INTEGRATION
-# ============================================================
+    blocked = client.post("/api/auth/session", headers=headers)
+    assert blocked.status_code == 403
+    verified = client.post("/api/auth/session", headers={"Authorization": f"Bearer test-firebase:{uid}:{email}:1"})
+    assert verified.status_code == 200
+    assert verified.json()["user"]["role"] == "author"
 
 def test_google_integration_status_and_mock_export():
     # 1. Status check

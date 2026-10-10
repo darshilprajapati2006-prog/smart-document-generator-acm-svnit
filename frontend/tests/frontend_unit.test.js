@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { isApprovedInstitutionalEmail } from "../src/utils/institutionalEmail.js";
 
 // Helper replicating frontend field mapping for Executive Meet
 function mapExecFields(extractedFields = {}) {
@@ -367,6 +368,15 @@ test("Registration input validator enforces password match and security policy",
   assert.equal(validateRegistration({ fullName: "User", email: "u@svnit.acm.org", password: "StrongPassword@1", confirmPassword: "StrongPassword@1" }).valid, true);
 });
 
+test("institutional email validation accepts SVNIT department domains and rejects lookalikes", () => {
+  for (const email of ["i25ai007@aid.svnit.ac.in", "student@cse.svnit.ac.in", "student@svnit.ac.in", "member@svnit.acm.org"]) {
+    assert.equal(isApprovedInstitutionalEmail(email), true, email);
+  }
+  for (const email of ["user@gmail.com", "user@svnit.ac.in.attacker.com", "user@evilsvnit.ac.in", "user@dept-svnit.ac.in"]) {
+    assert.equal(isApprovedInstitutionalEmail(email), false, email);
+  }
+});
+
 test("OTP verification input strictly requires 6 numeric digits", () => {
   function validateOtp(code) {
     if (!code) return false;
@@ -379,6 +389,5 @@ test("OTP verification input strictly requires 6 numeric digits", () => {
   assert.equal(validateOtp("12a456"), false); // non-numeric
   assert.equal(validateOtp("849201"), true); // valid 6 digits
 });
-
 
 

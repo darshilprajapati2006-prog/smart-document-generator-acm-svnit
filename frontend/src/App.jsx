@@ -15,10 +15,8 @@ import {
   generateBillSummary,
   extractFromNLP,
   classifyPrompt,
-  loginUser,
   logoutUser,
   fetchCurrentUserProfile,
-  getAuthToken,
   exportToGoogleDrive,
   distributeByEmail,
   signDocument,
@@ -302,14 +300,7 @@ export default function App() {
   // Good-to-Have Features State
   const [lang, setLang] = useState("en"); // "en" | "hi" | "gu"
   const [activeTab, setActiveTab] = useState("create"); // "create" | "batch" | "history" | "templates" | "analytics"
-  const [currentUser, setCurrentUser] = useState(() => {
-    try {
-      const saved = localStorage.getItem("acm_doc_user");
-      return saved ? JSON.parse(saved) : null;
-    } catch {
-      return null;
-    }
-  });
+  const [currentUser, setCurrentUser] = useState(null);
   const [currentRole, setCurrentRole] = useState(() => {
     try {
       const saved = localStorage.getItem("acm_doc_user");
@@ -356,22 +347,17 @@ export default function App() {
       const isHealthy = await checkBackendHealth();
       setApiOnline(isHealthy);
 
-      const token = getAuthToken();
-      if (token) {
-        try {
-          const profile = await fetchCurrentUserProfile();
-          if (profile && profile.authenticated && profile.user) {
-            setCurrentUser(profile.user);
-            setCurrentRole(profile.user.role);
-            localStorage.setItem("acm_doc_user", JSON.stringify(profile.user));
-          } else {
-            setCurrentUser(null);
-            localStorage.removeItem("acm_doc_user");
-          }
-        } catch {
-          // In offline mode, retain cached session
+      try {
+        const profile = await fetchCurrentUserProfile();
+        if (profile?.authenticated && profile.user) {
+          setCurrentUser(profile.user);
+          setCurrentRole(profile.user.role);
+          localStorage.setItem("acm_doc_user", JSON.stringify(profile.user));
+        } else {
+          setCurrentUser(null);
+          localStorage.removeItem("acm_doc_user");
         }
-      } else {
+      } catch {
         setCurrentUser(null);
         localStorage.removeItem("acm_doc_user");
       }

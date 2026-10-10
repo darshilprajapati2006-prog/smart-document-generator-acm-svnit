@@ -16,9 +16,7 @@ import pytest
 from fastapi.testclient import TestClient
 from app.main import app
 from app.db.seed import seed_database
-from app.core.security import decode_access_token
-from app.services.email_service import get_latest_sent_otp
-from app.services.otp_service import issue_otp_challenge
+from app.core.security import create_access_token
 
 client = TestClient(app)
 
@@ -28,156 +26,73 @@ def setup_db(monkeypatch):
     seed_database()
 
 def helper_login(email: str, password: str) -> dict:
-    """Helper to perform password login (Requirement 17: no login OTP required) and return session payload."""
-    res1 = client.post("/api/auth/login", json={"email": email, "password": password})
-    assert res1.status_code == 200, f"Login failed for {email}: {res1.text}"
-    data1 = res1.json()
-    assert data1["success"] is True
-    assert "access_token" in data1
-    assert data1["requires_otp"] is False
-    return data1
+    """Test helper representing a successfully verified Firebase session."""
+    from app.db.database import get_db
+    with get_db() as conn:
+        row = conn.execute("SELECT id,email,full_name,role,status,is_verified FROM users WHERE email=?", (email,)).fetchone()
+    assert row, f"Missing seeded test user: {email}"
+    token = create_access_token(row["id"], row["email"], row["role"], row["full_name"])
+    return {"access_token": token, "user": dict(row), "success": True}
+
+
+def firebase_headers(email, uid, verified=False):
+    return {"Authorization": f"Bearer test-firebase:{uid}:{email}:{1 if verified else 0}"}
 
 
 # ============================================================
 # 1. TWO-STEP LOGIN TESTS (All 6 Roles)
 # ============================================================
 
-def test_two_step_login_all_six_roles():
-    """Verify 2FA login flow works for all 6 institutional roles."""
-    roles_credentials = [
+def test_verified_firebase_sessions_preserve_database_roles():
+    for email, password, expected in [
         ("admin@svnit.acm.org", "Admin@1234", "admin"),
         ("author@svnit.acm.org", "Author@1234", "author"),
         ("reviewer@svnit.acm.org", "Reviewer@1234", "reviewer"),
         ("approver@svnit.acm.org", "Approver@1234", "approver"),
         ("tmpladmin@svnit.acm.org", "TmplAdmin@1234", "template_admin"),
         ("viewer@svnit.acm.org", "Viewer@1234", "viewer"),
-    ]
+    ]:
+        data = helper_login(email, password)
+        res = client.get("/api/auth/me", headers={"Authorization": f"Bearer {data['access_token']}"})
+        assert res.status_code == 200
+        assert res.json()["user"]["role"] == expected
 
-    for email, pwd, expected_role in roles_credentials:
-        data = helper_login(email, pwd)
-        assert data["user"]["email"] == email
-        assert data["user"]["role"] == expected_role
+def test_firebase_token_required_for_backend_authentication():
+    assert client.get("/api/auth/me").status_code == 401
+    assert client.get("/api/auth/me", headers={"Authorization": "Bearer invalid-token"}).status_code == 401
+    assert client.get("/api/auth/me", headers={"Authorization": "Bearer test-firebase:unlinked:user@svnit.ac.in:1"}).status_code == 401
 
-        decoded = decode_access_token(data["access_token"])
-        assert decoded is not None
-        assert decoded["email"] == email
-        assert decoded["role"] == expected_role
+def test_unverified_firebase_token_cannot_open_backend_session():
+    email = "student@svnit.ac.in"
+    token = "test-firebase:uid-unverified:student@svnit.ac.in:0"
+    assert client.post("/api/auth/session", headers={"Authorization": f"Bearer {token}"}).status_code == 403
 
-
-def test_login_invalid_credentials_and_formats():
-    """Verify rejection of wrong password, unknown user, and invalid format."""
-    # Wrong password
-    res = client.post("/api/auth/login", json={"email": "admin@svnit.acm.org", "password": "WrongPassword!999"})
-    assert res.status_code == 401
-    assert "Invalid email or password" in res.json()["detail"]
-
-    # Unknown user
-    res2 = client.post("/api/auth/login", json={"email": "nobody@svnit.acm.org", "password": "AnyPassword123"})
-    assert res2.status_code == 401
-    assert "Invalid email or password" in res2.json()["detail"]
-
-    # Invalid email syntax
-    res3 = client.post("/api/auth/login", json={"email": "not-an-email", "password": "Password123"})
-    assert res3.status_code == 422
-
-
-def test_login_otp_tampering_and_replay_prevention():
-    """Verify wrong OTP is rejected and OTP cannot be reused after verification."""
-    from app.services.otp_service import issue_otp_challenge
-    from app.db.database import get_db
-    email = "author@svnit.acm.org"
-    with get_db() as conn:
-        raw_otp, challenge_id = issue_otp_challenge(conn, email=email, purpose="login_2fa", user_id="usr-author-01")
-
-    # Incorrect OTP
-    bad_res = client.post("/api/auth/verify-login-otp", json={"challenge_id": challenge_id, "otp": "000000"})
-    assert bad_res.status_code == 400
-    assert "attempt(s) remaining" in bad_res.json()["detail"].lower()
-
-    # Correct OTP
-    ok_res = client.post("/api/auth/verify-login-otp", json={"challenge_id": challenge_id, "otp": raw_otp})
-    assert ok_res.status_code == 200
-
-    # Replay attempt with same challenge & OTP -> must fail
-    replay_res = client.post("/api/auth/verify-login-otp", json={"challenge_id": challenge_id, "otp": raw_otp})
-    assert replay_res.status_code == 400
-
-
-# ============================================================
-# 2. SIGN-UP / PUBLIC REGISTRATION & EMAIL OTP VERIFICATION
-# ============================================================
-
-def test_signup_registration_and_email_verification():
-    """Verify sign-up creates unverified account, requires OTP, and activates upon verification."""
+def test_signup_registration_requires_firebase_email_verification():
     email = f"new_author_{uuid.uuid4().hex[:6]}@svnit.acm.org"
-    password = "StrongPassword@2026"
-
-    # 1. Submit valid registration
-    reg_res = client.post("/api/auth/register", json={
-        "full_name": "New SVNIT Author",
-        "email": email,
-        "password": password,
-        "confirm_password": password
+    uid = f"uid-{uuid.uuid4().hex}"
+    res = client.post("/api/auth/register", headers=firebase_headers(email, uid), json={
+        "role": "author", "full_name": "New SVNIT Author", "email": email,
     })
-    assert reg_res.status_code == 200
-    assert reg_res.json()["success"] is True
+    assert res.status_code == 200
+    assert res.json()["requires_email_verification"] is True
+    assert client.post("/api/auth/session", headers=firebase_headers(email, uid)).status_code == 403
+    assert client.get("/api/auth/me", headers=firebase_headers(email, uid, True)).status_code == 403
+    verified = client.post("/api/auth/session", headers=firebase_headers(email, uid, True))
+    assert verified.status_code == 200
+    assert verified.json()["user"]["role"] == "author"
+    assert verified.json()["user"]["is_verified"] == 1
 
-    # OTP is stored hashed; tests issue the real challenge directly rather than retaining plaintext in mail logs.
-    from app.db.database import get_db
-    with get_db() as conn:
-        otp, _ = issue_otp_challenge(conn, email=email, purpose="signup_verification")
-
-    # 2. Login before verification must be rejected
-    unverified_login = client.post("/api/auth/login", json={"email": email, "password": password})
-    assert unverified_login.status_code == 403
-    assert "not been verified" in unverified_login.json()["detail"].lower()
-
-    # 3. Verify with incorrect OTP -> fails
-    bad_otp_res = client.post("/api/auth/verify-email-otp", json={"email": email, "otp": "999999"})
-    assert bad_otp_res.status_code == 400
-
-    # 4. Verify with correct OTP -> activates account
-    verify_res = client.post("/api/auth/verify-email-otp", json={"email": email, "otp": otp})
-    assert verify_res.status_code == 200
-    assert verify_res.json()["success"] is True
-
-    # 5. Now user can log in via 2FA
-    login_data = helper_login(email, password)
-    assert login_data["user"]["role"] == "author"
-    assert login_data["user"]["is_verified"] == 1
-
-
-def test_signup_validation_and_duplicate_rejection():
-    """Verify duplicate email and password policy enforcement on registration."""
-    # Password mismatch
-    res_mismatch = client.post("/api/auth/register", json={
-        "full_name": "Test User",
-        "email": "mismatch@svnit.acm.org",
-        "password": "Password@123",
-        "confirm_password": "DifferentPassword@123"
+def test_public_registration_rejects_privileged_role_and_noninstitutional_domain():
+    email = f"rolecheck_{uuid.uuid4().hex[:6]}@svnit.ac.in"
+    uid = f"uid-{uuid.uuid4().hex}"
+    bad_role = client.post("/api/auth/register", headers=firebase_headers(email, uid), json={
+        "role": "admin", "full_name": "Role Check", "email": email,
     })
-    assert res_mismatch.status_code == 400
-    assert "do not match" in res_mismatch.json()["detail"].lower()
-
-    # Weak password (< 8 chars or no digits)
-    res_weak = client.post("/api/auth/register", json={
-        "full_name": "Test User",
-        "email": "weak@svnit.acm.org",
-        "password": "short",
-        "confirm_password": "short"
+    assert bad_role.status_code == 403
+    external = client.post("/api/auth/register", headers=firebase_headers("student@example.com", uid), json={
+        "role": "author", "full_name": "External", "email": "student@example.com",
     })
-    assert res_weak.status_code == 422 or res_weak.status_code == 400
-
-    # Duplicate registered email
-    res_dup = client.post("/api/auth/register", json={
-        "full_name": "Duplicate Admin",
-        "email": "admin@svnit.acm.org",
-        "password": "StrongPassword@123",
-        "confirm_password": "StrongPassword@123"
-    })
-    assert res_dup.status_code == 400
-    assert "already exists" in res_dup.json()["detail"].lower()
-
+    assert external.status_code == 422
 
 def test_public_registration_rejects_privileged_role_and_noninstitutional_domain():
     base = {
@@ -192,74 +107,12 @@ def test_public_registration_rejects_privileged_role_and_noninstitutional_domain
     assert external.status_code == 422
 
 
-def test_otp_resend_cooldown():
-    """Verify OTP resend is rate-limited by a 60-second cooldown."""
-    email = f"cooldown_{uuid.uuid4().hex[:6]}@svnit.acm.org"
-    client.post("/api/auth/register", json={
-        "full_name": "Cooldown Test",
-        "email": email,
-        "password": "Password@1234",
-        "confirm_password": "Password@1234"
-    })
+def test_legacy_resend_otp_endpoint_is_removed():
+    assert client.post("/api/auth/resend-email-otp", json={"email": "student@svnit.ac.in"}).status_code == 404
 
-    # Immediate resend request -> 429 Too Many Requests
-    resend = client.post("/api/auth/resend-email-otp", json={"email": email})
-    assert resend.status_code == 429
-    assert "wait" in resend.json()["detail"].lower()
-
-
-# ============================================================
-# 3. FORGOT PASSWORD & PASSWORD RESET FLOW
-# ============================================================
-
-def test_forgot_password_and_reset_flow():
-    """Verify password recovery via OTP and immediate authentication with new password."""
-    email = f"recovery_{uuid.uuid4().hex[:6]}@svnit.acm.org"
-    initial_pwd = "InitialPassword@2026"
-    new_pwd = "UpdatedPassword@2026"
-
-    # Register and activate test user
-    reg = client.post("/api/auth/register", json={
-        "full_name": "Recovery User",
-        "email": email,
-        "password": initial_pwd,
-        "confirm_password": initial_pwd
-    })
-    from app.db.database import get_db
-    with get_db() as conn:
-        signup_otp, _ = issue_otp_challenge(conn, email=email, purpose="signup_verification")
-    client.post("/api/auth/verify-email-otp", json={"email": email, "otp": signup_otp})
-
-    # 1. Request recovery code
-    req_res = client.post("/api/auth/forgot-password", json={"email": email})
-    assert req_res.status_code == 200
-
-    from app.db.database import get_db
-    with get_db() as conn:
-        reset_otp, _ = issue_otp_challenge(conn, email=email, purpose="password_reset")
-
-    # 2. Reset password with valid OTP and new password
-    reset_res = client.post("/api/auth/reset-password", json={
-        "email": email,
-        "otp": reset_otp,
-        "new_password": new_pwd,
-        "confirm_password": new_pwd
-    })
-    assert reset_res.status_code == 200
-    assert "successfully updated" in reset_res.json()["message"].lower()
-
-    # 3. Old password now rejected
-    old_login = client.post("/api/auth/login", json={"email": email, "password": initial_pwd})
-    assert old_login.status_code == 401
-
-    # 4. New password succeeds via 2FA
-    new_login = helper_login(email, new_pwd)
-    assert new_login["user"]["email"] == email
-
-
-# ============================================================
-# 4. SYSTEM ADMIN USER MANAGEMENT & AUDIT LOGS
-# ============================================================
+def test_legacy_otp_password_reset_endpoint_is_removed():
+    assert client.post("/api/auth/forgot-password", json={"email": "student@svnit.ac.in"}).status_code == 404
+    assert client.post("/api/auth/reset-password", json={}).status_code == 404
 
 def test_admin_user_management_lifecycle():
     """Verify System Admin can list, create, change roles, deactivate accounts, and view audit logs."""
@@ -314,7 +167,7 @@ def test_admin_user_management_lifecycle():
     assert deact_res.status_code == 200
 
     # Deactivated user blocked from logging in
-    blocked_login = client.post("/api/auth/login", json={"email": new_email, "password": "SecurePassword@123"})
+    blocked_login = client.get("/api/auth/me", headers={"Authorization": f"Bearer {reviewer_token}"})
     assert blocked_login.status_code == 403
 
     # Deactivated user's existing token blocked
@@ -376,75 +229,55 @@ def test_document_generation_role_permissions():
     assert admin_gen.json()["success"] is True
 
 
-def test_demo_auth_mode_lifecycle(monkeypatch):
-    """Verify DEMO mode allows signup/login without OTP and clearly marks email unverified."""
+def test_legacy_demo_mode_cannot_bypass_firebase_verification(monkeypatch):
     monkeypatch.setenv("DEMO_AUTH_MODE", "true")
     email = f"demo_user_{uuid.uuid4().hex[:6]}@aid.svnit.ac.in"
-    pwd = "DemoPassword@123"
-
-    # 1. Legacy mode endpoint continues to require verification
-    mode_res = client.get("/api/auth/mode")
-    assert mode_res.status_code == 200
-    assert mode_res.json()["demo_mode"] is True
-    assert mode_res.json()["email_verification_required"] is False
-
-    # 2. Registration requires OTP even when a legacy bypass flag is set
-    reg = client.post("/api/auth/register", json={
-        "role": "author",
-        "full_name": "Demo Student",
-        "email": email,
-        "password": pwd,
-        "confirm_password": pwd
+    uid = f"uid-{uuid.uuid4().hex}"
+    reg = client.post("/api/auth/register", headers=firebase_headers(email, uid), json={
+        "role": "author", "full_name": "Demo Student", "email": email,
     })
     assert reg.status_code == 200
-    assert reg.json()["requires_otp"] is True
-    assert reg.json()["is_verified"] is False
-
-    # Unverified accounts cannot log in even when a legacy demo flag is set.
-    login = client.post("/api/auth/login", json={"email": email, "password": pwd})
-    assert login.status_code == 403
-
-    # 4. Forgot password
-    forgot = client.post("/api/auth/forgot-password", json={"email": email})
-    assert forgot.status_code == 200
-    assert "demo_mode" not in forgot.json()
-    reset = client.post("/api/auth/reset-password", json={
-        "email": email,
-        "otp": "000000",
-        "new_password": "NewDemoPass@456",
-        "confirm_password": "NewDemoPass@456"
-    })
-    assert reset.status_code == 400
-
+    assert client.post("/api/auth/session", headers=firebase_headers(email, uid)).status_code == 403
 
 def test_approved_institutional_email_domains(monkeypatch):
     """Verify SVNIT institutional domains and subdomains are permitted."""
+    monkeypatch.setenv("ALLOWED_EMAIL_DOMAINS", "svnit.ac.in")
     monkeypatch.setenv("DEMO_AUTH_MODE", "false")
     monkeypatch.setenv("ALLOW_ANY_EMAIL", "false")
 
     # Approved SVNIT subdomain
-    valid_aid = client.post("/api/auth/register", json={
-        "full_name": "AI Dept Student",
-        "email": f"student_{uuid.uuid4().hex[:6]}@aid.svnit.ac.in",
-        "password": "Password@123",
-        "confirm_password": "Password@123"
+    aid_email = f"student_{uuid.uuid4().hex[:6]}@aid.svnit.ac.in"
+    aid_uid = f"uid-{uuid.uuid4().hex}"
+    valid_aid = client.post("/api/auth/register", headers=firebase_headers(aid_email, aid_uid), json={
+        "role": "author", "full_name": "AI Dept Student", "email": aid_email,
     })
     assert valid_aid.status_code == 200
 
+    # Other department subdomains accepted by the Render root-domain allowlist.
+    cse_email = f"student_{uuid.uuid4().hex[:6]}@cse.svnit.ac.in"
+    cse_uid = f"uid-{uuid.uuid4().hex}"
+    valid_cse = client.post("/api/auth/register", headers=firebase_headers(cse_email, cse_uid), json={
+        "role": "author", "full_name": "CSE Student", "email": cse_email,
+    })
+    assert valid_cse.status_code == 200
+
     # Approved SVNIT main domain
-    valid_svnit = client.post("/api/auth/register", json={
-        "full_name": "Faculty Member",
-        "email": f"faculty_{uuid.uuid4().hex[:6]}@svnit.ac.in",
-        "password": "Password@123",
-        "confirm_password": "Password@123"
+    svnit_email = f"faculty_{uuid.uuid4().hex[:6]}@svnit.ac.in"
+    svnit_uid = f"uid-{uuid.uuid4().hex}"
+    valid_svnit = client.post("/api/auth/register", headers=firebase_headers(svnit_email, svnit_uid), json={
+        "role": "author", "full_name": "Faculty Member", "email": svnit_email,
     })
     assert valid_svnit.status_code == 200
 
+    # Exact label-boundary matching prevents suffix/lookalike domain bypasses.
+    for email in ["student@gmail.com", "student@svnit.ac.in.attacker.com"]:
+        rejected = client.post("/api/auth/register", headers=firebase_headers(email, f"uid-{uuid.uuid4().hex}"), json={
+            "role": "author", "full_name": "Untrusted User", "email": email,
+        })
+        assert rejected.status_code == 422
+
     # Unapproved external domain when ALLOW_ANY_EMAIL is false
     unapproved = client.post("/api/auth/register", json={
-        "full_name": "External User",
-        "email": "external@randomdomain123.com",
-        "password": "Password@123",
-        "confirm_password": "Password@123"
+        "role": "author", "full_name": "External User", "email": "external@randomdomain123.com",
     })
     assert unapproved.status_code == 422 or unapproved.status_code == 400

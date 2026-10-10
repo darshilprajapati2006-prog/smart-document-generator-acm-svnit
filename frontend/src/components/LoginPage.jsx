@@ -1,18 +1,15 @@
-import React, { useState, useEffect } from "react";
+import React, { useState } from "react";
+import { firebaseAuth } from "../services/firebase";
+import { reload, sendEmailVerification, signOut } from "firebase/auth";
 import {
   loginUser,
-  verifyLoginOtp,
-  resendLoginOtp,
   registerUser,
-  verifyEmailOtp,
-  resendEmailOtp,
   forgotPassword,
-  resetPassword,
-  setAuthToken,
 } from "../services/documentApi";
+import { isApprovedInstitutionalEmail } from "../utils/institutionalEmail";
 
 export default function LoginPage({ onLoginSuccess }) {
-  // Views: "signin" | "signup" | "verify_email" | "verify_login" | "forgot" | "reset"
+  // Views: sign in, signup, verification notice, and password recovery.
   const [view, setView] = useState("signin");
 
   // Sign In State
@@ -28,31 +25,12 @@ export default function LoginPage({ onLoginSuccess }) {
   const [confirmPassword, setConfirmPassword] = useState("");
   const [showRegisterPassword, setShowRegisterPassword] = useState(false);
 
-  // OTP Verification State
-  const [otpCode, setOtpCode] = useState("");
-  const [activeChallengeId, setActiveChallengeId] = useState("");
   const [activeEmail, setActiveEmail] = useState("");
-  const [resendCooldown, setResendCooldown] = useState(0);
-
-  // Password Reset State
-  const [resetOtp, setResetOtp] = useState("");
-  const [newPassword, setNewPassword] = useState("");
-  const [confirmNewPassword, setConfirmNewPassword] = useState("");
-  const [showResetPassword, setShowResetPassword] = useState(false);
 
   // UI Feedback
   const [loading, setLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
   const [successMessage, setSuccessMessage] = useState("");
-
-  // Cooldown countdown timer
-  useEffect(() => {
-    if (resendCooldown <= 0) return;
-    const timer = setInterval(() => {
-      setResendCooldown((prev) => (prev > 0 ? prev - 1 : 0));
-    }, 1000);
-    return () => clearInterval(timer);
-  }, [resendCooldown]);
 
   function resetFeedback() {
     setErrorMessage("");
@@ -61,7 +39,6 @@ export default function LoginPage({ onLoginSuccess }) {
 
   function switchView(newView) {
     resetFeedback();
-    setOtpCode("");
     setView(newView);
   }
 
@@ -80,16 +57,8 @@ export default function LoginPage({ onLoginSuccess }) {
     setLoading(true);
     try {
       const data = await loginUser(loginEmail.trim(), loginPassword);
-      if (data && data.requires_otp) {
-        // Step 1 passed, move to Step 2 (Login 2FA OTP)
-        setActiveChallengeId(data.challenge_id);
-        setActiveEmail(loginEmail.trim());
-        setResendCooldown(data.cooldown_seconds || 60);
-        setSuccessMessage(data.message || "Login verification code sent to your registered email.");
-        setView("verify_login");
-      } else if (data && data.access_token && data.user) {
-        // Direct password login (Requirement 17: no login OTP required)
-        setAuthToken(data.access_token);
+      if (data && data.access_token && data.user) {
+        // Successful Firebase authentication is complete; the backend returned DB-authorized role data.
         localStorage.setItem("acm_doc_user", JSON.stringify(data.user));
         if (onLoginSuccess) onLoginSuccess(data.user);
       } else {
@@ -97,54 +66,10 @@ export default function LoginPage({ onLoginSuccess }) {
       }
     } catch (err) {
       setErrorMessage(err.message || "Invalid email or password. Please try again.");
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  // -------------------------------------------------------------
-  // 2. Login 2FA OTP Verification Handlers
-  // -------------------------------------------------------------
-  async function handleVerifyLoginOtp(e) {
-    e.preventDefault();
-    resetFeedback();
-
-    if (!otpCode.trim() || otpCode.trim().length !== 6) {
-      setErrorMessage("Please enter the complete 6-digit verification code.");
-      return;
-    }
-
-    setLoading(true);
-    try {
-      const data = await verifyLoginOtp({
-        challenge_id: activeChallengeId,
-        otp: otpCode.trim(),
-      });
-      if (data && data.user) {
-        if (data.access_token) setAuthToken(data.access_token);
-        localStorage.setItem("acm_doc_user", JSON.stringify(data.user));
-        if (onLoginSuccess) onLoginSuccess(data.user);
-      } else {
-        setErrorMessage("Verification failed. Please check your code.");
+      if (err.code === "auth/email-not-verified") {
+        setActiveEmail(loginEmail.trim());
+        setView("verify_email");
       }
-    } catch (err) {
-      setErrorMessage(err.message || "Invalid or expired verification code.");
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  async function handleResendLoginOtp() {
-    if (resendCooldown > 0) return;
-    resetFeedback();
-    setLoading(true);
-    try {
-      const data = await resendLoginOtp({ challenge_id: activeChallengeId });
-      if (data.challenge_id) setActiveChallengeId(data.challenge_id);
-      setResendCooldown(data.cooldown_seconds || 60);
-      setSuccessMessage(data.message || "A new verification code has been dispatched.");
-    } catch (err) {
-      setErrorMessage(err.message || "Failed to resend code.");
     } finally {
       setLoading(false);
     }
@@ -164,6 +89,11 @@ export default function LoginPage({ onLoginSuccess }) {
 
     if (registerPassword !== confirmPassword) {
       setErrorMessage("Password and Confirm Password do not match.");
+      return;
+    }
+
+    if (!isApprovedInstitutionalEmail(registerEmail)) {
+      setErrorMessage("Use your SVNIT institutional email address.");
       return;
     }
 
@@ -187,61 +117,65 @@ export default function LoginPage({ onLoginSuccess }) {
         confirm_password: confirmPassword,
       });
 
-      if (data && data.requires_otp) {
-        // Production: OTP verification required
+      if (data && data.success) {
         setActiveEmail(registerEmail.trim());
-        setResendCooldown(data.cooldown_seconds || 60);
-        setSuccessMessage(data.message || "Verification code sent to your email.");
+        setSuccessMessage("Verification link sent. Check your inbox.");
         setView("verify_email");
       } else {
         setErrorMessage("We couldn't start registration. Please try again.");
       }
     } catch (err) {
       setErrorMessage(err.message || "Registration failed. Please check your details.");
+      if (firebaseAuth.currentUser && !firebaseAuth.currentUser.emailVerified) {
+        setActiveEmail(registerEmail.trim());
+        setView("verify_email");
+      }
     } finally {
       setLoading(false);
     }
   }
 
   // -------------------------------------------------------------
-  // 4. Sign Up Email OTP Verification Handlers
+  // Email verification link handlers
   // -------------------------------------------------------------
-  async function handleVerifyEmailOtp(e) {
-    e.preventDefault();
+  async function handleVerifyEmailOtp() {
     resetFeedback();
-
-    if (!otpCode.trim() || otpCode.trim().length !== 6) {
-      setErrorMessage("Please enter the complete 6-digit verification code.");
-      return;
-    }
-
     setLoading(true);
     try {
-      const data = await verifyEmailOtp({
-        email: activeEmail,
-        otp: otpCode.trim(),
+      if (!firebaseAuth.currentUser) throw new Error("Sign in to check your verification status.");
+      await reload(firebaseAuth.currentUser);
+      if (!firebaseAuth.currentUser.emailVerified) throw new Error("Open the verification link in your inbox, then try again.");
+      const token = await firebaseAuth.currentUser.getIdToken(true);
+      const response = await fetch(`${import.meta.env.VITE_API_BASE_URL || "http://127.0.0.1:8000"}/api/auth/session`, {
+        method: "POST", headers: { Authorization: `Bearer ${token}` },
       });
-      setSuccessMessage(data.message || "Email verified! You can now sign in.");
+      if (!response.ok) {
+        const result = await response.json().catch(() => ({}));
+        throw new Error(result.detail || "We could not activate your SmartDocs account.");
+      }
+      const profile = await response.json();
+      setSuccessMessage("Email verified. You can now sign in.");
       setLoginEmail(activeEmail);
       setLoginPassword("");
       setView("signin");
+      await signOut(firebaseAuth);
+      if (profile?.user) localStorage.setItem("acm_doc_user", JSON.stringify(profile.user));
     } catch (err) {
-      setErrorMessage(err.message || "Verification failed. Please check your code.");
+      setErrorMessage(err.message || "Email verification could not be confirmed.");
     } finally {
       setLoading(false);
     }
   }
 
-  async function handleResendEmailOtp() {
-    if (resendCooldown > 0) return;
+  async function handleResendVerificationLink() {
     resetFeedback();
     setLoading(true);
     try {
-      const data = await resendEmailOtp({ email: activeEmail });
-      setResendCooldown(data.cooldown_seconds || 60);
-      setSuccessMessage(data.message || "A new verification code has been dispatched.");
+      if (!firebaseAuth.currentUser) throw new Error("Create your account again to request a new verification link.");
+      await sendEmailVerification(firebaseAuth.currentUser, { url: window.location.origin });
+      setSuccessMessage("A new verification link has been sent.");
     } catch (err) {
-      setErrorMessage(err.message || "Failed to resend code.");
+      setErrorMessage(err.message || "We couldn't send a verification link. Try again later.");
     } finally {
       setLoading(false);
     }
@@ -262,58 +196,15 @@ export default function LoginPage({ onLoginSuccess }) {
     setLoading(true);
     try {
       const data = await forgotPassword({ email: activeEmail.trim() });
-      setResendCooldown(data.cooldown_seconds || 60);
-      setSuccessMessage(data.message || "If registered, a recovery code has been sent.");
-      setView("reset");
-    } catch (err) {
-      setErrorMessage(err.message || "Failed to process recovery request.");
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  async function handleResetPasswordSubmit(e) {
-    e.preventDefault();
-    resetFeedback();
-
-    if (!resetOtp.trim() || resetOtp.trim().length !== 6) {
-      setErrorMessage("Please enter the 6-digit verification code.");
-      return;
-    }
-
-    if (newPassword !== confirmNewPassword) {
-      setErrorMessage("New Password and Confirm Password do not match.");
-      return;
-    }
-
-    if (newPassword.length < 8) {
-      setErrorMessage("Password must be at least 8 characters long.");
-      return;
-    }
-
-    if (!/\d/.test(newPassword) || !/[a-zA-Z]/.test(newPassword)) {
-      setErrorMessage("Password must contain both letters and at least one numeric digit.");
-      return;
-    }
-
-    setLoading(true);
-    try {
-      const data = await resetPassword({
-        email: activeEmail.trim(),
-        otp: resetOtp.trim(),
-        new_password: newPassword,
-        confirm_password: confirmNewPassword,
-      });
-      setSuccessMessage(data.message || "Password updated successfully. Please sign in.");
-      setLoginEmail(activeEmail.trim());
-      setLoginPassword("");
+      setSuccessMessage(data.message || "If an account exists, a password reset link has been sent.");
       setView("signin");
-    } catch (err) {
-      setErrorMessage(err.message || "Password reset failed. Invalid or expired code.");
+    } catch {
+      setSuccessMessage("If an account exists, a password reset link has been sent.");
     } finally {
       setLoading(false);
     }
   }
+
 
   return (
     <div
@@ -814,217 +705,22 @@ export default function LoginPage({ onLoginSuccess }) {
         )}
 
         {/* ========================================================= */}
-        {/* VIEW 3: VERIFY EMAIL OTP (After Sign Up)                  */}
+        {/* VIEW 3: EMAIL VERIFICATION LINK                           */}
         {/* ========================================================= */}
         {view === "verify_email" && (
-          <form onSubmit={handleVerifyEmailOtp} style={{ padding: "12px 32px 28px" }}>
-            <div style={{ textAlign: "center", marginBottom: "20px" }}>
-              <div style={{ fontSize: "2rem", marginBottom: "8px" }}>📧</div>
-              <h3 style={{ margin: "0 0 6px 0", color: "#ffffff", fontSize: "1.15rem" }}>
-                Verify Institutional Email
-              </h3>
-              <p style={{ margin: 0, color: "#94a3b8", fontSize: "0.82rem" }}>
-                Enter the 6-digit verification code dispatched to:
-                <br />
-                <strong style={{ color: "#38bdf8" }}>{activeEmail}</strong>
-              </p>
-            </div>
-
-            <div style={{ marginBottom: "20px" }}>
-              <input
-                id="otp-email-input"
-                type="text"
-                maxLength={6}
-                value={otpCode}
-                onChange={(e) => setOtpCode(e.target.value.replace(/\D/g, ""))}
-                placeholder="· · · · · ·"
-                required
-                autoFocus
-                style={{
-                  width: "100%",
-                  textAlign: "center",
-                  letterSpacing: "12px",
-                  fontSize: "1.6rem",
-                  fontWeight: 700,
-                  padding: "12px 14px",
-                  borderRadius: "8px",
-                  border: "2px solid #0284c7",
-                  background: "rgba(15, 23, 42, 0.7)",
-                  color: "#38bdf8",
-                  outline: "none",
-                  boxSizing: "border-box",
-                  fontFamily: "monospace",
-                }}
-              />
-            </div>
-
-            <button
-              type="submit"
-              disabled={loading || otpCode.length !== 6}
-              style={{
-                width: "100%",
-                padding: "12px",
-                borderRadius: "8px",
-                border: "none",
-                background: loading || otpCode.length !== 6
-                  ? "#475569"
-                  : "linear-gradient(135deg, #0284c7 0%, #2563eb 100%)",
-                color: "#ffffff",
-                fontSize: "0.92rem",
-                fontWeight: 600,
-                cursor: loading || otpCode.length !== 6 ? "not-allowed" : "pointer",
-                boxShadow: "0 4px 12px rgba(2, 132, 199, 0.35)",
-              }}
-            >
-              {loading ? "Verifying..." : "Verify & Activate Account"}
+          <div style={{ padding: "24px 32px 32px", textAlign: "center" }}>
+            <div style={{ fontSize: "2rem", marginBottom: "8px" }}>📧</div>
+            <h3 style={{ color: "#fff", margin: "0 0 10px" }}>Check your inbox</h3>
+            <p style={{ color: "#cbd5e1", lineHeight: 1.6 }}>
+              We sent a verification link to <strong>{activeEmail}</strong>. Open that link, then return here to sign in.
+            </p>
+            {errorMessage && <p role="alert" style={{ color: "#fca5a5" }}>{errorMessage}</p>}
+            <button type="button" onClick={handleVerifyEmailOtp} disabled={loading} style={{ width: "100%", padding: 12, border: 0, borderRadius: 8, color: "white", background: "linear-gradient(135deg,#0284c7,#2563eb)", cursor: "pointer" }}>
+              {loading ? "Checking…" : "I've verified my email"}
             </button>
-
-            <div
-              style={{
-                marginTop: "18px",
-                display: "flex",
-                justifyContent: "space-between",
-                alignItems: "center",
-                fontSize: "0.82rem",
-              }}
-            >
-              <button
-                type="button"
-                onClick={handleResendEmailOtp}
-                disabled={resendCooldown > 0 || loading}
-                style={{
-                  background: "none",
-                  border: "none",
-                  color: resendCooldown > 0 ? "#64748b" : "#38bdf8",
-                  cursor: resendCooldown > 0 ? "not-allowed" : "pointer",
-                  padding: 0,
-                }}
-              >
-                {resendCooldown > 0 ? `Resend code in ${resendCooldown}s` : "Resend code"}
-              </button>
-
-              <button
-                type="button"
-                onClick={() => switchView("signin")}
-                style={{
-                  background: "none",
-                  border: "none",
-                  color: "#94a3b8",
-                  cursor: "pointer",
-                  padding: 0,
-                }}
-              >
-                Back to Sign In
-              </button>
-            </div>
-          </form>
-        )}
-
-        {/* ========================================================= */}
-        {/* VIEW 4: LOGIN 2FA OTP VERIFICATION                        */}
-        {/* ========================================================= */}
-        {view === "verify_login" && (
-          <form onSubmit={handleVerifyLoginOtp} style={{ padding: "12px 32px 28px" }}>
-            <div style={{ textAlign: "center", marginBottom: "20px" }}>
-              <div style={{ fontSize: "2rem", marginBottom: "8px" }}>🔐</div>
-              <h3 style={{ margin: "0 0 6px 0", color: "#ffffff", fontSize: "1.15rem" }}>
-                Two-Factor Login Verification
-              </h3>
-              <p style={{ margin: 0, color: "#94a3b8", fontSize: "0.82rem" }}>
-                Enter the one-time authentication code sent to:
-                <br />
-                <strong style={{ color: "#38bdf8" }}>{activeEmail}</strong>
-              </p>
-            </div>
-
-            <div style={{ marginBottom: "20px" }}>
-              <input
-                id="otp-login-input"
-                type="text"
-                maxLength={6}
-                value={otpCode}
-                onChange={(e) => setOtpCode(e.target.value.replace(/\D/g, ""))}
-                placeholder="· · · · · ·"
-                required
-                autoFocus
-                style={{
-                  width: "100%",
-                  textAlign: "center",
-                  letterSpacing: "12px",
-                  fontSize: "1.6rem",
-                  fontWeight: 700,
-                  padding: "12px 14px",
-                  borderRadius: "8px",
-                  border: "2px solid #2563eb",
-                  background: "rgba(15, 23, 42, 0.7)",
-                  color: "#60a5fa",
-                  outline: "none",
-                  boxSizing: "border-box",
-                  fontFamily: "monospace",
-                }}
-              />
-            </div>
-
-            <button
-              type="submit"
-              disabled={loading || otpCode.length !== 6}
-              style={{
-                width: "100%",
-                padding: "12px",
-                borderRadius: "8px",
-                border: "none",
-                background: loading || otpCode.length !== 6
-                  ? "#475569"
-                  : "linear-gradient(135deg, #0284c7 0%, #2563eb 100%)",
-                color: "#ffffff",
-                fontSize: "0.92rem",
-                fontWeight: 600,
-                cursor: loading || otpCode.length !== 6 ? "not-allowed" : "pointer",
-                boxShadow: "0 4px 12px rgba(2, 132, 199, 0.35)",
-              }}
-            >
-              {loading ? "Authenticating Session..." : "Confirm & Enter Workspace"}
-            </button>
-
-            <div
-              style={{
-                marginTop: "18px",
-                display: "flex",
-                justifyContent: "space-between",
-                alignItems: "center",
-                fontSize: "0.82rem",
-              }}
-            >
-              <button
-                type="button"
-                onClick={handleResendLoginOtp}
-                disabled={resendCooldown > 0 || loading}
-                style={{
-                  background: "none",
-                  border: "none",
-                  color: resendCooldown > 0 ? "#64748b" : "#38bdf8",
-                  cursor: resendCooldown > 0 ? "not-allowed" : "pointer",
-                  padding: 0,
-                }}
-              >
-                {resendCooldown > 0 ? `Resend code in ${resendCooldown}s` : "Resend code"}
-              </button>
-
-              <button
-                type="button"
-                onClick={() => switchView("signin")}
-                style={{
-                  background: "none",
-                  border: "none",
-                  color: "#94a3b8",
-                  cursor: "pointer",
-                  padding: 0,
-                }}
-              >
-                Back to Sign In
-              </button>
-            </div>
-          </form>
+            <button type="button" onClick={handleResendVerificationLink} disabled={loading} style={{ marginTop: 16, background: "none", border: 0, color: "#38bdf8", cursor: "pointer" }}>Resend verification link</button>
+            <div><button type="button" onClick={() => switchView("signin")} style={{ marginTop: 14, background: "none", border: 0, color: "#94a3b8", cursor: "pointer" }}>Back to Sign In</button></div>
+          </div>
         )}
 
         {/* ========================================================= */}
@@ -1038,7 +734,7 @@ export default function LoginPage({ onLoginSuccess }) {
                 Account Recovery
               </h3>
               <p style={{ margin: 0, color: "#94a3b8", fontSize: "0.82rem" }}>
-                Enter your registered institutional email to receive a password reset code.
+              Enter your institutional email and we’ll send a secure password reset link.
               </p>
             </div>
 
@@ -1094,7 +790,7 @@ export default function LoginPage({ onLoginSuccess }) {
                 boxShadow: "0 4px 12px rgba(2, 132, 199, 0.35)",
               }}
             >
-              {loading ? "Sending Code..." : "Send Password Recovery Code"}
+              {loading ? "Sending Link..." : "Send Password Reset Link"}
             </button>
 
             <div style={{ marginTop: "18px", textAlign: "center" }}>
@@ -1116,185 +812,7 @@ export default function LoginPage({ onLoginSuccess }) {
           </form>
         )}
 
-        {/* ========================================================= */}
-        {/* VIEW 6: RESET PASSWORD                                    */}
-        {/* ========================================================= */}
-        {view === "reset" && (
-          <form onSubmit={handleResetPasswordSubmit} style={{ padding: "12px 32px 28px" }}>
-            <div style={{ textAlign: "center", marginBottom: "16px" }}>
-              <div style={{ fontSize: "2rem", marginBottom: "8px" }}>🛡️</div>
-              <h3 style={{ margin: "0 0 6px 0", color: "#ffffff", fontSize: "1.15rem" }}>
-                Set New Password
-              </h3>
-              <p style={{ margin: 0, color: "#94a3b8", fontSize: "0.82rem" }}>
-                Enter the recovery code sent to <strong style={{ color: "#38bdf8" }}>{activeEmail}</strong>
-              </p>
-            </div>
 
-            <div style={{ marginBottom: "14px" }}>
-              <label
-                htmlFor="reset-otp"
-                style={{
-                  display: "block",
-                  marginBottom: "6px",
-                  color: "#cbd5e1",
-                  fontSize: "0.82rem",
-                  fontWeight: 600,
-                }}
-              >
-                6-Digit Recovery Code
-              </label>
-              <input
-                id="reset-otp"
-                type="text"
-                maxLength={6}
-                value={resetOtp}
-                onChange={(e) => setResetOtp(e.target.value.replace(/\D/g, ""))}
-                placeholder="· · · · · ·"
-                required
-                style={{
-                  width: "100%",
-                  textAlign: "center",
-                  letterSpacing: "8px",
-                  fontSize: "1.3rem",
-                  fontWeight: 700,
-                  padding: "10px 14px",
-                  borderRadius: "8px",
-                  border: "1px solid rgba(255, 255, 255, 0.2)",
-                  background: "rgba(15, 23, 42, 0.7)",
-                  color: "#38bdf8",
-                  outline: "none",
-                  boxSizing: "border-box",
-                }}
-              />
-            </div>
-
-            <div style={{ marginBottom: "14px" }}>
-              <label
-                htmlFor="new-pwd"
-                style={{
-                  display: "block",
-                  marginBottom: "6px",
-                  color: "#cbd5e1",
-                  fontSize: "0.82rem",
-                  fontWeight: 600,
-                }}
-              >
-                New Password (min 8 chars, letter + digit)
-              </label>
-              <div style={{ position: "relative" }}>
-                <input
-                  id="new-pwd"
-                  type={showResetPassword ? "text" : "password"}
-                  value={newPassword}
-                  onChange={(e) => setNewPassword(e.target.value)}
-                  placeholder="Enter new password"
-                  required
-                  style={{
-                    width: "100%",
-                    padding: "10px 44px 10px 14px",
-                    borderRadius: "8px",
-                    border: "1px solid rgba(255, 255, 255, 0.15)",
-                    background: "rgba(15, 23, 42, 0.6)",
-                    color: "#ffffff",
-                    fontSize: "0.9rem",
-                    outline: "none",
-                    boxSizing: "border-box",
-                  }}
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowResetPassword(!showResetPassword)}
-                  style={{
-                    position: "absolute",
-                    right: "10px",
-                    top: "50%",
-                    transform: "translateY(-50%)",
-                    background: "transparent",
-                    border: "none",
-                    color: "#94a3b8",
-                    cursor: "pointer",
-                    padding: "4px",
-                  }}
-                >
-                  {showResetPassword ? "👁️" : "🙈"}
-                </button>
-              </div>
-            </div>
-
-            <div style={{ marginBottom: "18px" }}>
-              <label
-                htmlFor="confirm-new-pwd"
-                style={{
-                  display: "block",
-                  marginBottom: "6px",
-                  color: "#cbd5e1",
-                  fontSize: "0.82rem",
-                  fontWeight: 600,
-                }}
-              >
-                Confirm New Password
-              </label>
-              <input
-                id="confirm-new-pwd"
-                type={showResetPassword ? "text" : "password"}
-                value={confirmNewPassword}
-                onChange={(e) => setConfirmNewPassword(e.target.value)}
-                placeholder="Confirm new password"
-                required
-                style={{
-                  width: "100%",
-                  padding: "10px 14px",
-                  borderRadius: "8px",
-                  border: "1px solid rgba(255, 255, 255, 0.15)",
-                  background: "rgba(15, 23, 42, 0.6)",
-                  color: "#ffffff",
-                  fontSize: "0.9rem",
-                  outline: "none",
-                  boxSizing: "border-box",
-                }}
-              />
-            </div>
-
-            <button
-              type="submit"
-              disabled={loading}
-              style={{
-                width: "100%",
-                padding: "12px",
-                borderRadius: "8px",
-                border: "none",
-                background: loading
-                  ? "#475569"
-                  : "linear-gradient(135deg, #0284c7 0%, #2563eb 100%)",
-                color: "#ffffff",
-                fontSize: "0.92rem",
-                fontWeight: 600,
-                cursor: loading ? "not-allowed" : "pointer",
-                boxShadow: "0 4px 12px rgba(2, 132, 199, 0.35)",
-              }}
-            >
-              {loading ? "Resetting Password..." : "Update Password & Sign In"}
-            </button>
-
-            <div style={{ marginTop: "18px", textAlign: "center" }}>
-              <button
-                type="button"
-                onClick={() => switchView("signin")}
-                style={{
-                  background: "none",
-                  border: "none",
-                  color: "#38bdf8",
-                  fontSize: "0.82rem",
-                  cursor: "pointer",
-                  padding: 0,
-                }}
-              >
-                Back to Sign In
-              </button>
-            </div>
-          </form>
-        )}
 
         {/* Footer Note */}
         <div
@@ -1312,7 +830,7 @@ export default function LoginPage({ onLoginSuccess }) {
               color: "#64748b",
             }}
           >
-            🔒 PBKDF2-HMAC-SHA256 Encryption · Two-Factor OTP Verification · ACM SVNIT
+              🔒 Secure sign-in · ACM SVNIT
           </p>
         </div>
       </div>
