@@ -289,6 +289,7 @@ export default function ClausesModal({
       }}
     >
       <div
+        className="theme-modal-card clauses-modal-card"
         style={{
           background: "#ffffff",
           borderRadius: "14px",

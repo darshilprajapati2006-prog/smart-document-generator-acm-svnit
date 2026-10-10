@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { bootstrapSystemAdmin } from "../services/documentApi";
+import { useEffect, useState } from "react";
+import { bootstrapSystemAdmin, getSystemAdminBootstrapStatus } from "../services/documentApi";
 
 const panelStyle = {
   width: "min(560px, calc(100vw - 32px))",
@@ -11,11 +11,22 @@ const panelStyle = {
   boxShadow: "0 24px 70px rgba(2,6,23,.4)",
 };
 
-export default function AdminBootstrapPage({ user, onSuccess, onContinue }) {
+export default function AdminBootstrapPage({ user, apiOnline, onSuccess, onContinue }) {
   const [confirmed, setConfirmed] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [checking, setChecking] = useState(true);
   const [error, setError] = useState("");
   const [result, setResult] = useState(null);
+  const [readiness, setReadiness] = useState(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    getSystemAdminBootstrapStatus()
+      .then((status) => { if (!cancelled) setReadiness(status); })
+      .catch((requestError) => { if (!cancelled) setError(requestError.message || "Bootstrap readiness could not be verified."); })
+      .finally(() => { if (!cancelled) setChecking(false); });
+    return () => { cancelled = true; };
+  }, []);
 
   async function handleBootstrap() {
     setError("");
@@ -48,21 +59,22 @@ export default function AdminBootstrapPage({ user, onSuccess, onContinue }) {
         ) : (
           <>
             <p style={{ color: "#cbd5e1", lineHeight: 1.65 }}>
-              Signed in as <strong>{user?.email}</strong>. The backend will promote only this preconfigured, verified Author profile. This operation is one-time and is protected by the server-side bootstrap configuration.
+              Signed in as <strong>{readiness?.email || user?.email}</strong>. The backend verifies that this is the configured account and that its existing Author profile is linked to this Firebase UID.
             </p>
-            {user?.role !== "author" && (
-              <p role="alert" style={{ color: "#fca5a5", lineHeight: 1.5 }}>Bootstrap can only be started from your current Author account.</p>
-            )}
+            <p role={readiness?.ready ? "status" : "alert"} style={{ color: readiness?.ready ? "#86efac" : "#fca5a5", lineHeight: 1.5 }}>
+              {checking ? "Checking backend health, database file, account match, and one-time status…" : !apiOnline ? "Backend health check failed. Bootstrap is unavailable." : readiness?.ready ? "Preflight passed: backend is healthy, the existing database and eligible profile are present, and bootstrap has not been consumed." : readiness?.reason || error || "Bootstrap preflight failed."}
+            </p>
+            {user?.role !== "author" && <p role="alert" style={{ color: "#fca5a5", lineHeight: 1.5 }}>Bootstrap can only be started from your current Author account.</p>}
             <label style={{ display: "flex", gap: 10, alignItems: "flex-start", margin: "20px 0", color: "#e2e8f0", lineHeight: 1.5, fontSize: 14 }}>
-              <input type="checkbox" checked={confirmed} onChange={(event) => setConfirmed(event.target.checked)} style={{ marginTop: 4 }} />
-              I confirmed in Render that the server bootstrap settings are configured for this exact account and that the SQLite database is on persistent storage before consuming the one-time setup.
+              <input type="checkbox" checked={confirmed} disabled={checking || !readiness?.ready || !apiOnline} onChange={(event) => setConfirmed(event.target.checked)} style={{ marginTop: 4 }} />
+              I confirmed in Render that this exact database file is on the service’s persistent disk and the service uses one instance before consuming the one-time setup.
             </label>
             {error && <p role="alert" style={{ color: "#fca5a5", lineHeight: 1.5 }}>{error}</p>}
             <button
               type="button"
               onClick={handleBootstrap}
-              disabled={!confirmed || loading || user?.role !== "author"}
-              style={{ ...buttonStyle, opacity: !confirmed || loading || user?.role !== "author" ? 0.55 : 1, cursor: !confirmed || loading || user?.role !== "author" ? "not-allowed" : "pointer" }}
+              disabled={!confirmed || loading || checking || !readiness?.ready || !apiOnline || user?.role !== "author" || readiness?.email?.toLowerCase() !== user?.email?.toLowerCase()}
+              style={{ ...buttonStyle, opacity: !confirmed || loading || checking || !readiness?.ready || !apiOnline || user?.role !== "author" || readiness?.email?.toLowerCase() !== user?.email?.toLowerCase() ? 0.55 : 1, cursor: !confirmed || loading || checking || !readiness?.ready || !apiOnline || user?.role !== "author" || readiness?.email?.toLowerCase() !== user?.email?.toLowerCase() ? "not-allowed" : "pointer" }}
             >
               {loading ? "Verifying and promoting…" : "Verify account and bootstrap admin"}
             </button>

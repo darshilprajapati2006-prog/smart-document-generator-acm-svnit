@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import "./App.css";
 import { translations } from "./i18n/translations";
 import BatchGenerator from "./components/BatchGenerator";
@@ -317,8 +317,12 @@ export default function App() {
   const [showRoleRequest, setShowRoleRequest] = useState(false);
   const [recommendation, setRecommendation] = useState(null);
   const [showClausesModal, setShowClausesModal] = useState(false);
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  const menuButtonRef = useRef(null);
+  const mobileNavRef = useRef(null);
   const [selectedDocIdForHistory, setSelectedDocIdForHistory] = useState("");
   const [actionStatus, setActionStatus] = useState(null);
+  const [apiHealthStatus, setApiHealthStatus] = useState("checking");
   const [emailModalOpen, setEmailModalOpen] = useState(false);
   const [emailTo, setEmailTo] = useState("");
   const [emailSubject, setEmailSubject] = useState("");
@@ -335,21 +339,12 @@ export default function App() {
     viewer: "Viewer",
   };
 
-  const roleColors = {
-    author: { bg: "#e0f2fe", border: "#bae6fd", pill: "#0284c7" },
-    reviewer: { bg: "#fef3c7", border: "#fde68a", pill: "#d97706" },
-    approver: { bg: "#dcfce7", border: "#bbf7d0", pill: "#16a34a" },
-    template_admin: { bg: "#f3e8ff", border: "#e9d5ff", pill: "#7c3aed" },
-    tmpladmin: { bg: "#f3e8ff", border: "#e9d5ff", pill: "#7c3aed" },
-    admin: { bg: "#fee2e2", border: "#fecaca", pill: "#dc2626" },
-    viewer: { bg: "#f1f5f9", border: "#cbd5e1", pill: "#475569" },
-  };
-
   // Validate session and check backend health on mount
   useEffect(() => {
     async function initAuthAndHealth() {
       const isHealthy = await checkBackendHealth();
       setApiOnline(isHealthy);
+      setApiHealthStatus(isHealthy ? "connected" : "offline");
 
       try {
         const profile = await fetchCurrentUserProfile();
@@ -373,6 +368,7 @@ export default function App() {
     const interval = setInterval(async () => {
       const isHealthy = await checkBackendHealth();
       setApiOnline(isHealthy);
+      setApiHealthStatus(isHealthy ? "connected" : "offline");
     }, 15000);
     return () => clearInterval(interval);
   }, []);
@@ -1060,6 +1056,40 @@ export default function App() {
 
   const selectedDocConfig = documentCards.find((d) => d.id === selectedType) || documentCards[0];
 
+  useEffect(() => {
+    if (!mobileNavOpen) return undefined;
+    const previousFocus = document.activeElement;
+    mobileNavRef.current?.querySelector("a[href], button:not([disabled])")?.focus();
+    function handleKeyDown(event) {
+      if (event.key === "Escape") {
+        setMobileNavOpen(false);
+        menuButtonRef.current?.focus();
+      }
+      if (event.key !== "Tab") return;
+      const items = mobileNavRef.current?.querySelectorAll("a[href], button:not([disabled])");
+      if (!items?.length) return;
+      const first = items[0];
+      const last = items[items.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    }
+    window.addEventListener("keydown", handleKeyDown);
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+      if (previousFocus?.isConnected) previousFocus.focus();
+    };
+  }, [mobileNavOpen]);
+
+  function navigateToTab(tab) {
+    setActiveTab(tab);
+    setMobileNavOpen(false);
+  }
+
   if (authChecking) {
     return (
       <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: "#0f172a", color: "#ffffff", fontFamily: "'Inter', sans-serif" }}>
@@ -1080,6 +1110,7 @@ export default function App() {
     return (
       <AdminBootstrapPage
         user={currentUser}
+        apiOnline={apiOnline}
         onSuccess={handleBootstrapSuccess}
         onContinue={exitBootstrapMode}
       />
@@ -1089,9 +1120,10 @@ export default function App() {
   return (
     <div className="app-shell">
       {/* SIDEBAR NAVIGATION */}
-      <aside className="sidebar">
+      <aside id="workspace-navigation" className={`sidebar ${mobileNavOpen ? "sidebar-open" : ""}`} ref={mobileNavRef} aria-label="Workspace navigation">
+        <button type="button" className="mobile-drawer-close" aria-label="Close navigation menu" onClick={() => setMobileNavOpen(false)}>×</button>
         <a className="brand" href="#home">
-          <span className="brand-icon">S</span>
+          <span className="brand-icon"><img src="/branding/acm_logo.png" alt="" /></span>
           <span>
             <strong>SmartDocs</strong>
             <small>ACM · SVNIT SURAT</small>
@@ -1103,7 +1135,7 @@ export default function App() {
         <button
           type="button"
           className={`nav-item nav-item-btn ${activeTab === "create" ? "active" : ""}`}
-          onClick={() => setActiveTab("create")}
+          onClick={() => navigateToTab("create")}
         >
           <span>▤</span> {t("create_doc")}
         </button>
@@ -1111,7 +1143,7 @@ export default function App() {
         <button
           type="button"
           className={`nav-item nav-item-btn ${activeTab === "batch" ? "active" : ""}`}
-          onClick={() => setActiveTab("batch")}
+          onClick={() => navigateToTab("batch")}
         >
           <span>📦</span> {t("batch_generator")}
         </button>
@@ -1119,7 +1151,7 @@ export default function App() {
         <button
           type="button"
           className={`nav-item nav-item-btn ${activeTab === "history" ? "active" : ""}`}
-          onClick={() => setActiveTab("history")}
+          onClick={() => navigateToTab("history")}
         >
           <span>⏳</span> {t("version_history")}
         </button>
@@ -1127,7 +1159,7 @@ export default function App() {
         <button
           type="button"
           className={`nav-item nav-item-btn ${activeTab === "templates" ? "active" : ""}`}
-          onClick={() => setActiveTab("templates")}
+          onClick={() => navigateToTab("templates")}
         >
           <span>🎨</span> {t("template_editor")}
         </button>
@@ -1135,7 +1167,7 @@ export default function App() {
         <button
           type="button"
           className={`nav-item nav-item-btn ${activeTab === "analytics" ? "active" : ""}`}
-          onClick={() => setActiveTab("analytics")}
+          onClick={() => navigateToTab("analytics")}
         >
           <span>📊</span> {t("analytics")}
         </button>
@@ -1145,7 +1177,7 @@ export default function App() {
             type="button"
             className="nav-item nav-item-btn"
             style={{ color: "#dc2626", fontWeight: 600 }}
-            onClick={() => setShowUserMgmt(true)}
+            onClick={() => { setShowUserMgmt(true); setMobileNavOpen(false); }}
           >
             <span>👥</span> User Management
           </button>
@@ -1179,131 +1211,68 @@ export default function App() {
       <main className="main-content" id="home">
         {/* TOPBAR WITH AUTHENTICATED USER & CONTROLS */}
         <header className="topbar">
-          <div className="breadcrumb">
-            Workspace <span>/</span> {activeTab.toUpperCase()} <span>/</span> {selectedDocConfig.title}
+          <button ref={menuButtonRef} type="button" className="mobile-menu-button" aria-label={mobileNavOpen ? "Close navigation menu" : "Open navigation menu"} aria-expanded={mobileNavOpen} aria-controls="workspace-navigation" onClick={() => setMobileNavOpen((open) => !open)}>
+            <span /><span /><span />
+          </button>
+          <div className="institution-mark" aria-label="ACM SVNIT">
+            <img src="/branding/svnit_logo.png" alt="SVNIT" />
+            <span>ACM<br /><small>SVNIT SURAT</small></span>
+          </div>
+          <div className="topbar-context">
+            <div className="breadcrumb" aria-label="Current workspace">
+              <span className="breadcrumb-root">Workspace</span><span aria-hidden="true">/</span> {activeTab.toUpperCase()} <span aria-hidden="true">/</span> {selectedDocConfig.title}
+            </div>
           </div>
 
-          <div className="topbar-controls">
-            {/* Authenticated User & Read-Only Role Indicator */}
-            <div
-              className="control-badge"
-              style={{
-                background: roleColors[currentRole]?.bg || "#f1f5f9",
-                borderColor: roleColors[currentRole]?.border || "#cbd5e1",
-                display: "flex",
-                alignItems: "center",
-                gap: "8px",
-                padding: "5px 12px",
-              }}
-              title={`Signed in as ${currentUser.full_name || currentUser.email}`}
-            >
-              <span style={{ fontSize: "0.85rem" }}>👤</span>
-              <span style={{ fontWeight: 600, fontSize: "0.82rem", color: "#0f172a" }}>
-                {currentUser.full_name || currentUser.email}
-              </span>
-              <span
-                style={{
-                  fontSize: "0.7rem",
-                  fontWeight: 700,
-                  padding: "2px 8px",
-                  borderRadius: "10px",
-                  background: roleColors[currentRole]?.pill || "#0284c7",
-                  color: "#ffffff",
-                  textTransform: "uppercase",
-                }}
-              >
-                {roleDisplayNames[currentRole] || currentRole}
-              </span>
-              {currentUser.is_verified === 0 && (
-                <span
-                  style={{
-                    fontSize: "0.68rem",
-                    fontWeight: 700,
-                    padding: "2px 6px",
-                    borderRadius: "6px",
-                    background: "#fef3c7",
-                    color: "#b45309",
-                    border: "1px solid #fde68a",
-                  }}
-                  title="Email verification required"
-                >
-                  ⚠️ Unverified
-                </span>
-              )}
+          <div className="topbar-controls" aria-label="Account controls">
+            <div className="account-cluster" title={`Signed in as ${currentUser.full_name || currentUser.email}`}>
+              <span className="account-avatar" aria-hidden="true">{(currentUser.full_name || currentUser.email || "U").slice(0, 1).toUpperCase()}</span>
+              <span className="account-name">{currentUser.full_name || currentUser.email}</span>
+              <span className={`role-badge role-${currentRole}`}>{roleDisplayNames[currentRole] || currentRole}</span>
             </div>
+            {currentUser.is_verified === 0 && <span className="verification-badge" title="Email verification required">Unverified</span>}
 
-            {/* Admin User Management Modal Trigger */}
-            {currentRole === "admin" && (
-              <button
-                type="button"
-                onClick={() => setShowUserMgmt(true)}
-                style={{
-                  padding: "6px 12px",
-                  borderRadius: "8px",
-                  border: "1px solid #fecaca",
-                  background: "#fff1f2",
-                  color: "#e11d48",
-                  fontSize: "0.8rem",
-                  fontWeight: 600,
-                  cursor: "pointer",
-                }}
-              >
-                👥 Users
-              </button>
-            )}
+            {currentRole === "admin" && <button type="button" onClick={() => setShowUserMgmt(true)} className="header-action admin-users-action">Users</button>}
+            {currentRole !== "admin" && <button type="button" onClick={() => setShowRoleRequest(true)} className="header-action request-role-action">Request role</button>}
 
-            {currentRole !== "admin" && (
-              <button type="button" onClick={() => setShowRoleRequest(true)} className="control-badge">
-                Request Role
-              </button>
-            )}
-
-            {/* Language Switcher */}
-            <div className="control-badge" title="Switch Interface Language (English, Hindi, Gujarati)">
-              <span>🌐</span>
-              <select value={lang} onChange={(e) => setLang(e.target.value)}>
-                <option value="en">English (EN)</option>
-                <option value="hi">हिन्दी (HI)</option>
-                <option value="gu">ગુજરાતી (GU)</option>
+            <label className="language-control" title="Switch interface language">
+              <span aria-hidden="true">🌐</span>
+              <select value={lang} onChange={(e) => setLang(e.target.value)} aria-label="Interface language">
+                <option value="en">English</option>
+                <option value="hi">हिन्दी</option>
+                <option value="gu">ગુજરાતી</option>
               </select>
+            </label>
+
+            <div className="health-indicator" data-state={apiHealthStatus} role="status" aria-live="polite">
+              <span className="health-dot" aria-hidden="true" />
+              <span>{apiHealthStatus === "checking" ? "Checking API" : apiOnline ? "API connected" : "API offline"}</span>
             </div>
 
-            {/* API Status */}
-            <div className="api-status">
-              <span
-                className="status-dot"
-                style={{ background: apiOnline ? "#10b981" : "#f59e0b" }}
-              />
-              {apiOnline ? "FastAPI Connected" : "Connecting..."}
-            </div>
+            <button type="button" onClick={handleLogout} className="header-action logout-action" title="Sign out of current account">Log out</button>
 
-            {/* Logout Button */}
-            <button
-              type="button"
-              onClick={handleLogout}
-              style={{
-                padding: "6px 12px",
-                borderRadius: "8px",
-                border: "1px solid #cbd5e1",
-                background: "#ffffff",
-                color: "#475569",
-                fontSize: "0.8rem",
-                fontWeight: 600,
-                cursor: "pointer",
-                display: "flex",
-                alignItems: "center",
-                gap: "4px",
-              }}
-              title="Sign out of current account"
-            >
-              🚪 Logout
-            </button>
+            <details className="mobile-account-menu">
+              <summary className="account-cluster" aria-label="Open account actions">
+                <span className="account-avatar" aria-hidden="true">{(currentUser.full_name || currentUser.email || "U").slice(0, 1).toUpperCase()}</span>
+                <span className="account-name">{currentUser.full_name || currentUser.email}</span>
+                <span className={`role-badge role-${currentRole}`}>{roleDisplayNames[currentRole] || currentRole}</span>
+              </summary>
+              <div className="mobile-account-popover">
+                {currentUser.is_verified === 0 && <span className="verification-badge">Email unverified</span>}
+                {currentRole === "admin" && <button type="button" onClick={() => setShowUserMgmt(true)} className="header-action">User management</button>}
+                {currentRole !== "admin" && <button type="button" onClick={() => setShowRoleRequest(true)} className="header-action">Request role</button>}
+                <label className="language-control"><span aria-hidden="true">🌐</span><select value={lang} onChange={(e) => setLang(e.target.value)} aria-label="Interface language"><option value="en">English</option><option value="hi">हिन्दी</option><option value="gu">ગુજરાતી</option></select></label>
+                <div className="health-indicator" data-state={apiHealthStatus} role="status"><span className="health-dot" aria-hidden="true" />{apiHealthStatus === "checking" ? "Checking API" : apiOnline ? "API connected" : "API offline"}</div>
+                <button type="button" onClick={handleLogout} className="header-action logout-action">Log out</button>
+              </div>
+            </details>
           </div>
         </header>
 
         {/* Read-Only Viewer Notice */}
         {currentRole === "viewer" && (
           <div
+            className="viewer-notice"
             role="status"
             style={{
               margin: "16px 28px 0",
@@ -1330,6 +1299,7 @@ export default function App() {
           <>
             {/* Hero Section */}
             <section className="welcome" id="create">
+              <div className="welcome-watermark" aria-hidden="true"><img src="/branding/svnit_logo.png" alt="" /></div>
               <div>
                 <div className="eyebrow">DOCUMENT AUTOMATION WORKSPACE</div>
                 <h1>
@@ -1341,6 +1311,7 @@ export default function App() {
                   Generate official Executive Meets, Bill Certificates, and Bill Summaries
                   from your natural language prompts or structured forms.
                 </p>
+                <div className="hero-meta"><span>SVNIT · SURAT</span><i /> <span>DOCUMENT OPERATIONS</span></div>
               </div>
               <div className="welcome-art" aria-hidden="true">
                 <div className="art-sheet sheet-back" />
@@ -2478,7 +2449,7 @@ export default function App() {
 
         {/* TAB 4: TEMPLATE EDITOR */}
         {activeTab === "templates" && (
-          <TemplateEditorPanel role={currentRole} lang={lang} />
+          <TemplateEditorPanel currentRole={currentRole} lang={lang} />
         )}
 
         {/* TAB 5: USAGE ANALYTICS */}
@@ -2488,7 +2459,7 @@ export default function App() {
 
         <footer className="page-footer">
           <span>Smart Document Generator · ACM SVNIT</span>
-          <span>FastAPI Backend + React Frontend · Production-Ready</span>
+          <span>FastAPI Backend · React Frontend</span>
         </footer>
       </main>
 
@@ -2522,7 +2493,7 @@ export default function App() {
       {/* EMAIL DISTRIBUTION MODAL */}
       {emailModalOpen && (
         <div className="clauses-modal-overlay">
-          <div className="clauses-modal" style={{ maxWidth: 440 }}>
+          <div className="clauses-modal theme-modal-card" style={{ maxWidth: 440 }}>
             <div className="clauses-modal-header">
               <h3>✉️ Distribute by Email</h3>
               <button

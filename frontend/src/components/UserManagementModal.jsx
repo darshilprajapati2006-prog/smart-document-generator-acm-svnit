@@ -165,6 +165,7 @@ export default function UserManagementModal({ isOpen, onClose, currentUserId }) 
       }}
     >
       <div
+        className="theme-modal-card user-management-card"
         style={{
           background: "#ffffff",
           borderRadius: "14px",

@@ -174,8 +174,8 @@ export default function VersionWorkflowPanel({ documentId, role }) {
   const activeDoc = documents.find(d => d.id === selectedDocId);
 
   return (
-    <div style={{ padding: "1.5rem", background: "#ffffff", borderRadius: "12px", border: "1px solid #e2e8f0", marginTop: "1.5rem" }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1.2rem" }}>
+    <section className="page-panel version-page">
+      <div className="page-panel-heading version-heading">
         <div>
           <h2 style={{ fontSize: "1.3rem", fontWeight: "700", color: "#0f172a", margin: 0 }}>
             🗂️ Document Version History & Approval Workflow (Features 4, 5, 7, 10, 11, 12)
@@ -184,7 +184,7 @@ export default function VersionWorkflowPanel({ documentId, role }) {
             Track persistent version snapshots, manage review lifecycle transitions, apply cryptographic digital signatures, and distribute via email / Drive.
           </p>
         </div>
-        <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+        <div className="version-heading-actions">
           {role && (
             <span style={{ fontSize: "0.85rem", padding: "4px 8px", background: "#f1f5f9", borderRadius: "6px", fontWeight: "600", color: "#334155" }}>
               👤 Role: {role}
@@ -212,13 +212,13 @@ export default function VersionWorkflowPanel({ documentId, role }) {
       )}
 
       {documents.length === 0 ? (
-        <div style={{ padding: "2rem", textAlign: "center", color: "#64748b" }}>
+      <div className="empty-state">
           No persisted documents found yet. Generate a document from the generator tab to start tracking versions.
         </div>
       ) : (
-        <div style={{ display: "grid", gridTemplateColumns: "300px 1fr", gap: "20px" }}>
+        <div className="version-workspace-grid">
           {/* Left: Document List */}
-          <div style={{ borderRight: "1px solid #e2e8f0", paddingRight: "16px" }}>
+          <div className="version-document-list">
             <h3 style={{ fontSize: "0.95rem", textTransform: "uppercase", color: "#64748b", marginBottom: "8px", letterSpacing: "0.5px" }}>
               Documents ({documents.length})
             </h3>
@@ -226,7 +226,12 @@ export default function VersionWorkflowPanel({ documentId, role }) {
               {documents.map((d) => (
                 <div
                   key={d.id}
+                  className={`version-document-option ${d.id === selectedDocId ? "is-selected" : ""}`}
                   onClick={() => setSelectedDocId(d.id)}
+                  role="button"
+                  tabIndex={0}
+                  aria-pressed={d.id === selectedDocId}
+                  onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); setSelectedDocId(d.id); } }}
                   style={{
                     padding: "10px",
                     borderRadius: "8px",
@@ -240,7 +245,7 @@ export default function VersionWorkflowPanel({ documentId, role }) {
                   </div>
                   <div style={{ display: "flex", justifyContent: "space-between", marginTop: "6px", fontSize: "0.8rem", color: "#64748b" }}>
                     <span>v{d.current_version}</span>
-                    <span style={{
+                    <span className={`version-status status-${d.status}`} style={{
                       padding: "2px 6px",
                       borderRadius: "4px",
                       fontSize: "0.75rem",
@@ -257,10 +262,10 @@ export default function VersionWorkflowPanel({ documentId, role }) {
           </div>
 
           {/* Right: Selected Document Detail & Lifecycle */}
-          <div>
+          <div className="version-detail">
             {activeDoc && (
               <div>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: "1px solid #e2e8f0", paddingBottom: "12px", marginBottom: "16px" }}>
+                <div className="version-detail-heading">
                   <div>
                     <h3 style={{ fontSize: "1.15rem", fontWeight: "700", margin: 0, color: "#0f172a" }}>
                       {activeDoc.title}
@@ -286,7 +291,7 @@ export default function VersionWorkflowPanel({ documentId, role }) {
                   </h4>
                   <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
                     {versions.map((v) => (
-                      <div key={v.version_num} style={{ padding: "10px", border: "1px solid #e2e8f0", borderRadius: "6px", background: "#f8fafc", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                      <div key={v.version_num} className="version-timeline-row">
                         <div>
                           <span style={{ fontWeight: "700", color: "#1d4ed8" }}>Version {v.version_num}</span>
                           <span style={{ marginLeft: "10px", fontSize: "0.85rem", color: "#334155" }}>
@@ -312,7 +317,7 @@ export default function VersionWorkflowPanel({ documentId, role }) {
                 </div>
 
                 {/* Section B: Approval Workflow Transition */}
-                <div style={{ marginBottom: "20px", padding: "14px", background: "#f1f5f9", borderRadius: "8px" }}>
+                <div className="workflow-panel">
                   <h4 style={{ fontSize: "0.95rem", fontWeight: "700", color: "#1e293b", margin: "0 0 10px 0" }}>
                     🔄 Review & Approval Lifecycle (Active Status: <span style={{ color: "#2563eb" }}>{activeDoc.status}</span>)
                   </h4>
@@ -356,7 +361,7 @@ export default function VersionWorkflowPanel({ documentId, role }) {
                 </div>
 
                 {/* Section C: Cryptographic Digital Signature & Tamper Detection */}
-                <div style={{ padding: "14px", border: "1px solid #e2e8f0", borderRadius: "8px", background: "#fcfcfc" }}>
+                <div className="signature-panel">
                   <h4 style={{ fontSize: "0.95rem", fontWeight: "700", color: "#1e293b", margin: "0 0 10px 0" }}>
                     🔏 Cryptographic Digital Signature (Feature 12: HMAC-SHA256)
                   </h4>
@@ -392,7 +397,7 @@ export default function VersionWorkflowPanel({ documentId, role }) {
       {/* Email Modal */}
       {showEmailModal && (
         <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }}>
-          <div style={{ background: "#ffffff", padding: "20px", borderRadius: "10px", width: "450px", maxWidth: "90%" }}>
+          <div className="theme-modal-card version-email-modal" style={{ width: "450px", maxWidth: "90%" }}>
             <h3 style={{ margin: "0 0 12px 0", fontSize: "1.1rem" }}>✉️ Distribute Document via Email (Feature 11)</h3>
             <form onSubmit={handleSendEmail} style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
               <div>
@@ -435,6 +440,6 @@ export default function VersionWorkflowPanel({ documentId, role }) {
           </div>
         </div>
       )}
-    </div>
+    </section>
   );
 }

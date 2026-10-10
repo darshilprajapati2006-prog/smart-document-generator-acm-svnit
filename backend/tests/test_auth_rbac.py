@@ -13,6 +13,7 @@ Tests:
 """
 import uuid
 import os
+from concurrent.futures import ThreadPoolExecutor
 from urllib.parse import urlparse, parse_qs
 import pytest
 from fastapi.testclient import TestClient
@@ -118,13 +119,13 @@ def test_verified_firebase_account_can_finish_missing_smartdocs_profile():
     assert row["is_verified"] == 1
 
 
-def test_viewer_public_registration_and_role_escalation_rejection():
+def test_public_registration_is_author_only_and_rejects_role_escalation():
     email = f"viewer_{uuid.uuid4().hex[:6]}@aid.svnit.ac.in"
     uid = f"uid-{uuid.uuid4().hex}"
     response = client.post("/api/auth/register", headers=firebase_headers(email, uid), json={
         "requested_role": "viewer", "full_name": "SVNIT Viewer", "email": email,
     })
-    assert response.status_code == 200 and response.json()["role"] == "viewer"
+    assert response.status_code == 403
     assert client.post("/api/auth/register", headers=firebase_headers("elevate@aid.svnit.ac.in", "x"), json={
         "role": "admin", "full_name": "Self Admin", "email": "elevate@aid.svnit.ac.in",
     }).status_code == 422
@@ -248,8 +249,36 @@ def test_bootstrap_requires_verified_allowlisted_author_and_is_one_time(monkeypa
     assert missing_persistent_path.status_code == 503
     monkeypatch.setenv("SMARTDOCS_DATABASE_PATH", configured_database_path)
 
-    success = client.post("/api/auth/bootstrap-admin", headers=firebase_headers(email, uid, True))
-    assert success.status_code == 200
+    missing_database = configured_database_path + ".does-not-exist"
+    monkeypatch.setenv("SMARTDOCS_DATABASE_PATH", missing_database)
+    missing_database_response = client.get("/api/auth/bootstrap-admin/status", headers=firebase_headers(email, uid, True))
+    assert missing_database_response.status_code == 503
+    assert not os.path.exists(missing_database)
+    monkeypatch.setenv("SMARTDOCS_DATABASE_PATH", configured_database_path)
+
+    unlinked_profile = client.get("/api/auth/bootstrap-admin/status", headers=firebase_headers(email, uid, True))
+    assert unlinked_profile.status_code == 200
+    assert unlinked_profile.json() == {
+        "ready": False,
+        "email": email,
+        "reason": "This account must have an existing active, verified Author profile linked to this Firebase account.",
+    }
+    unlinked_promotion = client.post("/api/auth/bootstrap-admin", headers=firebase_headers(email, uid, True))
+    assert unlinked_promotion.status_code == 409
+    with get_db() as conn:
+        conn.execute("UPDATE users SET firebase_uid=? WHERE id='bootstrap-author'", (uid,))
+
+    ready = client.get("/api/auth/bootstrap-admin/status", headers=firebase_headers(email, uid, True))
+    assert ready.status_code == 200
+    assert ready.json() == {"ready": True, "email": email}
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        attempts = list(executor.map(
+            lambda _: client.post("/api/auth/bootstrap-admin", headers=firebase_headers(email, uid, True)),
+            range(2),
+        ))
+    assert sorted(response.status_code for response in attempts) == [200, 409]
+    success = next(response for response in attempts if response.status_code == 200)
     assert success.json()["user"]["id"] == "bootstrap-author"
     assert success.json()["user"]["role"] == "admin"
 
@@ -291,6 +320,17 @@ def test_bootstrap_rejects_token_from_another_firebase_project(monkeypatch):
     })
     response = client.post("/api/auth/bootstrap-admin", headers={"Authorization": "Bearer validly-signed-wrong-project-token"})
     assert response.status_code == 401
+
+    monkeypatch.setattr(firebase_auth, "verify_firebase_id_token", lambda _token: {
+        "uid": "foreign-uid",
+        "sub": "foreign-uid",
+        "email": "bootstrap@aid.svnit.ac.in",
+        "email_verified": True,
+        "aud": "smartdocs-svnit-6904c",
+        "iss": "https://securetoken.google.com/some-other-project",
+    })
+    wrong_issuer = client.post("/api/auth/bootstrap-admin", headers={"Authorization": "Bearer validly-signed-wrong-issuer-token"})
+    assert wrong_issuer.status_code == 401
 
 
 def test_vercel_production_origin_is_allowed_for_authorized_bootstrap_request():

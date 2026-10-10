@@ -1,9 +1,42 @@
-@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&display=swap");
 
 :root {
-  font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  color: #172033;
-  background: #f7f8fc;
+  color-scheme: dark;
+  --canvas: #0b0c14;
+  --sidebar: #101019;
+  --header: rgba(14, 14, 23, .96);
+  --surface: #191923;
+  --surface-raised: #20202f;
+  --surface-soft: #151520;
+  --surface-paper: #fffdf8;
+  --line: rgba(220, 214, 239, .14);
+  --text: #f3f0f7;
+  --text-secondary: #c3bfcd;
+  --muted: #a29daf;
+  --violet: #b39bff;
+  --violet-strong: #9a7cff;
+  --gold: #d7b879;
+  --success: #5fc993;
+  --warning: #e5bb69;
+  --danger: #ed7c88;
+  --focus: #c1aaff;
+  --shadow-card: 0 16px 40px rgba(0, 0, 0, .2);
+  --shadow-popover: 0 24px 64px rgba(0, 0, 0, .48);
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 18px;
+  --radius-xl: 24px;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --duration-fast: 140ms;
+  --duration-normal: 220ms;
+  font-family: "DM Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  color: #f3f1f8;
+  background: #0c0d16;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
@@ -36,7 +69,19 @@ textarea {
 }
 
 button:focus-visible,
-a:focus-visible {
-  outline: 3px solid #a79af5;
+a:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  outline: 3px solid var(--focus);
   outline-offset: 3px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }

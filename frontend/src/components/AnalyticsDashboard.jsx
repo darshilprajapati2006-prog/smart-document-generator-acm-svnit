@@ -31,8 +31,8 @@ export default function AnalyticsDashboard() {
   }
 
   return (
-    <div style={{ padding: "1.5rem", background: "#ffffff", borderRadius: "12px", border: "1px solid #e2e8f0", marginTop: "1.5rem" }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1.2rem" }}>
+    <section className="page-panel analytics-page">
+      <div className="page-panel-heading analytics-heading">
         <div>
           <h2 style={{ fontSize: "1.3rem", fontWeight: "700", color: "#0f172a", margin: 0 }}>
             📊 Privacy-Conscious Usage Analytics (Feature 13)
@@ -41,7 +41,7 @@ export default function AnalyticsDashboard() {
             Real-time operational telemetry tracking performance, generation success rates, and workflow distributions.
           </p>
         </div>
-        <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+        <div className="analytics-controls">
           {loading && <span style={{ fontSize: "0.85rem", color: "#64748b" }}>Updating...</span>}
           <select
             value={filterType}
@@ -59,36 +59,36 @@ export default function AnalyticsDashboard() {
         </div>
       </div>
 
-      <div style={{ padding: "8px 12px", background: "#f8fafc", color: "#64748b", borderRadius: "6px", border: "1px solid #e2e8f0", fontSize: "0.82rem", marginBottom: "1rem" }}>
+      <div className="privacy-notice">
         🔒 <b>Privacy Guarantee:</b> Analytics captures strictly operational metadata (duration, success/failure status, template type). No personal student names, banking numbers, or prompt text are logged.
       </div>
 
       {metrics && (
         <div>
           {/* Top Metric Cards */}
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: "14px", marginBottom: "1.5rem" }}>
-            <div style={{ padding: "16px", borderRadius: "8px", background: "#eff6ff", border: "1px solid #bfdbfe" }}>
+          <div className="analytics-metrics-grid">
+            <div className="analytics-metric metric-violet">
               <div style={{ fontSize: "0.82rem", color: "#1e40af", fontWeight: "600" }}>TOTAL GENERATED</div>
               <div style={{ fontSize: "1.8rem", fontWeight: "800", color: "#1d4ed8", marginTop: "4px" }}>
                 {metrics.total_documents_generated}
               </div>
             </div>
 
-            <div style={{ padding: "16px", borderRadius: "8px", background: "#f0fdf4", border: "1px solid #bbf7d0" }}>
+            <div className="analytics-metric metric-green">
               <div style={{ fontSize: "0.82rem", color: "#166534", fontWeight: "600" }}>SUCCESS RATE</div>
               <div style={{ fontSize: "1.8rem", fontWeight: "800", color: "#15803d", marginTop: "4px" }}>
                 {metrics.success_rate_percentage}%
               </div>
             </div>
 
-            <div style={{ padding: "16px", borderRadius: "8px", background: "#fef3c7", border: "1px solid #fde68a" }}>
+            <div className="analytics-metric metric-gold">
               <div style={{ fontSize: "0.82rem", color: "#92400e", fontWeight: "600" }}>AVG DURATION</div>
               <div style={{ fontSize: "1.8rem", fontWeight: "800", color: "#b45309", marginTop: "4px" }}>
                 {metrics.avg_generation_duration_ms} ms
               </div>
             </div>
 
-            <div style={{ padding: "16px", borderRadius: "8px", background: "#faf5ff", border: "1px solid #e9d5ff" }}>
+            <div className="analytics-metric metric-violet">
               <div style={{ fontSize: "0.82rem", color: "#6b21a8", fontWeight: "600" }}>PERSISTED DOCS</div>
               <div style={{ fontSize: "1.8rem", fontWeight: "800", color: "#7e22ce", marginTop: "4px" }}>
                 {metrics.total_persisted_documents}
@@ -97,8 +97,8 @@ export default function AnalyticsDashboard() {
           </div>
 
           {/* Breakdown Tables */}
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "20px" }}>
-            <div style={{ padding: "14px", border: "1px solid #e2e8f0", borderRadius: "8px", background: "#f8fafc" }}>
+          <div className="analytics-breakdown-grid">
+            <div className="analytics-breakdown-card">
               <h4 style={{ margin: "0 0 10px 0", fontSize: "0.95rem", color: "#1e293b" }}>
                 📋 Breakdown by Document Type
               </h4>
@@ -118,7 +118,7 @@ export default function AnalyticsDashboard() {
               </div>
             </div>
 
-            <div style={{ padding: "14px", border: "1px solid #e2e8f0", borderRadius: "8px", background: "#f8fafc" }}>
+            <div className="analytics-breakdown-card">
               <h4 style={{ margin: "0 0 10px 0", fontSize: "0.95rem", color: "#1e293b" }}>
                 🔄 Workflow Status Distribution
               </h4>
@@ -134,6 +134,6 @@ export default function AnalyticsDashboard() {
           </div>
         </div>
       )}
-    </div>
+    </section>
   );
 }

@@ -10,7 +10,9 @@ import re
 import uuid
 import hashlib
 import secrets
+import sqlite3
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from typing import Dict, Any, List, Optional
 from fastapi import APIRouter, HTTPException, Depends, Header, Request, status
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -27,7 +29,7 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 
 EMAIL_PATTERN = re.compile(r"^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$")
 VALID_ROLES = ["viewer", "author", "reviewer", "approver", "template_admin", "admin"]
-PUBLIC_ROLES = {r.strip().lower() for r in os.getenv("PUBLIC_REGISTRATION_ROLES", "author,viewer").split(",") if r.strip()} & {"author", "viewer"}
+PUBLIC_ROLES = {r.strip().lower() for r in os.getenv("PUBLIC_REGISTRATION_ROLES", "author").split(",") if r.strip()} & {"author"}
 
 def validate_password_policy(password: str) -> None:
     """Enforces appropriate institutional password policy."""
@@ -381,14 +383,8 @@ def get_current_user_profile(user: Dict[str, Any] = Depends(require_authenticate
 # 4. INITIAL SYSTEM ADMIN BOOTSTRAP (Requirement 8)
 # ============================================================
 
-@router.post("/bootstrap-admin")
-def bootstrap_admin(authorization: Optional[str] = Header(None)):
-    """Promotes only the configured, verified Author account during one-time bootstrap.
-
-    ADMIN_BOOTSTRAP_SECRET is a backend-only enablement secret; it is never
-    accepted from or sent by the browser. ADMIN_BOOTSTRAP_EMAIL scopes the
-    otherwise one-time operation to the intended account.
-    """
+def _verified_bootstrap_identity(authorization: Optional[str]) -> tuple[Dict[str, Any], str, str]:
+    """Verify the bearer token and return claims, email, and UID for bootstrap."""
     if not authorization or not authorization.lower().startswith("bearer "):
         raise HTTPException(status_code=401, detail="Verified Firebase identity required.")
     from app.core.firebase_auth import verify_firebase_id_token
@@ -399,33 +395,96 @@ def bootstrap_admin(authorization: Optional[str] = Header(None)):
     email = str(claims.get("email", "")).strip().lower()
     uid = str(claims.get("uid", ""))
     project_id = os.getenv("FIREBASE_PROJECT_ID", "smartdocs-svnit-6904c").strip()
-    expected_issuer = f"https://securetoken.google.com/{project_id}"
     if (
         not uid
         or not claims.get("sub")
         or claims.get("sub") != uid
         or claims.get("aud") != project_id
-        or claims.get("iss") != expected_issuer
+        or claims.get("iss") != f"https://securetoken.google.com/{project_id}"
     ):
         raise HTTPException(status_code=401, detail="Firebase token is invalid for this project.")
     if claims.get("email_verified") is not True or not email:
         raise HTTPException(status_code=403, detail="Use a verified institutional Firebase account to bootstrap.")
     if not is_approved_institutional_email(email):
         raise HTTPException(status_code=403, detail="This email domain is not approved for System Admin bootstrap.")
+    return claims, email, uid
 
+
+def _bootstrap_configuration(email: str) -> Path:
+    """Validate backend arming settings and require an existing SQLite file."""
     configured_secret = os.environ.get("ADMIN_BOOTSTRAP_SECRET", "").strip()
     if len(configured_secret) < 32 or configured_secret.lower().startswith("replace-with-"):
         raise HTTPException(status_code=503, detail="System Admin bootstrap is not configured on the server.")
-    database_path = os.environ.get("SMARTDOCS_DATABASE_PATH", "").strip()
-    if not database_path:
-        raise HTTPException(status_code=503, detail="System Admin bootstrap requires an explicitly configured persistent database path.")
+
     bootstrap_email = os.environ.get("ADMIN_BOOTSTRAP_EMAIL", "").strip().lower()
-    if not bootstrap_email:
-        raise HTTPException(status_code=503, detail="System Admin bootstrap is not configured on the server.")
-    if not is_approved_institutional_email(bootstrap_email):
+    if not bootstrap_email or not is_approved_institutional_email(bootstrap_email):
         raise HTTPException(status_code=503, detail="System Admin bootstrap is not configured on the server.")
     if not secrets.compare_digest(email, bootstrap_email):
         raise HTTPException(status_code=403, detail="This Firebase account is not authorized for initial System Admin setup.")
+
+    database_path = os.environ.get("SMARTDOCS_DATABASE_PATH", "").strip()
+    if not database_path:
+        raise HTTPException(status_code=503, detail="System Admin bootstrap requires an explicitly configured persistent database path.")
+    path = Path(database_path).expanduser()
+    # Do not let SQLite silently create a new, empty database on a mistyped
+    # Render path. Bootstrap may only inspect and modify an existing DB file.
+    if not path.is_absolute() or not path.is_file():
+        raise HTTPException(status_code=503, detail="Configured database file does not exist; bootstrap will not create a new database.")
+    return path
+
+
+def _bootstrap_profile_status(database_path: Path, email: str, uid: str) -> tuple[bool, bool]:
+    """Read readiness flags from an existing database without creating a file."""
+    try:
+        conn = sqlite3.connect(f"file:{database_path}?mode=ro", uri=True, timeout=10)
+        conn.row_factory = sqlite3.Row
+        try:
+            tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+            if not {"users", "system_bootstrap"}.issubset(tables):
+                raise HTTPException(status_code=503, detail="Configured database is missing required SmartDocs tables.")
+            consumed = conn.execute("SELECT 1 FROM system_bootstrap WHERE id = 1").fetchone() is not None
+            active_admin = conn.execute("SELECT 1 FROM users WHERE role='admin' AND is_active=1 LIMIT 1").fetchone() is not None
+            profile = conn.execute("SELECT * FROM users WHERE email = ?", (email,)).fetchone()
+            eligible = bool(
+                profile
+                and profile["role"] == "author"
+                and profile["status"] == "active"
+                and profile["is_active"] == 1
+                and profile["is_verified"] == 1
+                and profile["firebase_uid"] == uid
+            )
+            return consumed or active_admin, eligible
+        finally:
+            conn.close()
+    except HTTPException:
+        raise
+    except (sqlite3.Error, OSError):
+        raise HTTPException(status_code=503, detail="Configured database could not be safely inspected.")
+
+
+@router.get("/bootstrap-admin/status")
+def bootstrap_admin_status(authorization: Optional[str] = Header(None)):
+    """Read-only preflight; reveals no secret, path, profile data, or token."""
+    _, email, uid = _verified_bootstrap_identity(authorization)
+    database_path = _bootstrap_configuration(email)
+    consumed, eligible = _bootstrap_profile_status(database_path, email, uid)
+    if consumed:
+        return {"ready": False, "email": email, "reason": "Bootstrap has already been completed."}
+    if not eligible:
+        return {"ready": False, "email": email, "reason": "This account must have an existing active, verified Author profile linked to this Firebase account."}
+    return {"ready": True, "email": email}
+
+@router.post("/bootstrap-admin")
+def bootstrap_admin(authorization: Optional[str] = Header(None)):
+    """Promotes only the configured, verified Author account during one-time bootstrap.
+
+    ADMIN_BOOTSTRAP_SECRET is a backend-only enablement secret; it is never
+    accepted from or sent by the browser. ADMIN_BOOTSTRAP_EMAIL scopes the
+    otherwise one-time operation to the intended account.
+    """
+    _, email, uid = _verified_bootstrap_identity(authorization)
+    database_path = _bootstrap_configuration(email)
+    _bootstrap_profile_status(database_path, email, uid)
 
     with get_db() as conn:
         conn.execute("BEGIN IMMEDIATE")
@@ -436,12 +495,12 @@ def bootstrap_admin(authorization: Optional[str] = Header(None)):
             raise HTTPException(status_code=403, detail="Sign in with your existing active Author profile before bootstrap.")
         if existing_user["role"] != "author" or existing_user["status"] != "active" or existing_user["is_active"] != 1 or existing_user["is_verified"] != 1:
             raise HTTPException(status_code=403, detail="Bootstrap requires your active, verified Author profile.")
-        if existing_user["firebase_uid"] and existing_user["firebase_uid"] != uid:
+        if existing_user["firebase_uid"] != uid:
             raise HTTPException(status_code=409, detail="This email is linked to another Firebase account.")
 
         updated = conn.execute(
-            "UPDATE users SET role = 'admin', firebase_uid = ?, status = 'active', is_active = 1, is_verified = 1 WHERE id = ? AND role = 'author'",
-            (uid, existing_user["id"]),
+            "UPDATE users SET role = 'admin', status = 'active', is_active = 1, is_verified = 1 WHERE id = ? AND role = 'author' AND firebase_uid = ? AND email = ?",
+            (existing_user["id"], uid, email),
         )
         if updated.rowcount != 1:
             raise HTTPException(status_code=409, detail="The Author profile changed; retry after reviewing the account.")

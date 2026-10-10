@@ -60,8 +60,8 @@ export default function TemplateEditorPanel({ currentRole }) {
   }
 
   return (
-    <div style={{ padding: "1.5rem", background: "#ffffff", borderRadius: "12px", border: "1px solid #e2e8f0", marginTop: "1.5rem" }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1.2rem" }}>
+    <section className="page-panel template-page">
+      <div className="page-panel-heading">
         <div>
           <h2 style={{ fontSize: "1.3rem", fontWeight: "700", color: "#0f172a", margin: 0 }}>
             🎨 Template Preview & Configuration Editor (Feature 8)
@@ -73,7 +73,7 @@ export default function TemplateEditorPanel({ currentRole }) {
       </div>
 
       {feedback.message && (
-        <div style={{
+        <div className={`feedback-banner ${feedback.type === "success" ? "feedback-success" : "feedback-error"}`} style={{
           padding: "10px 14px",
           background: feedback.type === "success" ? "#f0fdf4" : "#fef2f2",
           color: feedback.type === "success" ? "#166534" : "#991b1b",
@@ -87,7 +87,7 @@ export default function TemplateEditorPanel({ currentRole }) {
       )}
 
       {/* Template Selectors */}
-      <div style={{ display: "flex", gap: "10px", marginBottom: "1rem" }}>
+      <div className="template-switcher">
         {(configs.length > 0 ? configs.map((c) => c.document_type) : ["exec_meet", "bill_certificate", "bill_summary"]).map((tId) => (
           <button
             key={tId}
@@ -101,16 +101,16 @@ export default function TemplateEditorPanel({ currentRole }) {
         ))}
       </div>
 
-      {currentRole && !["tmpladmin", "admin"].includes(currentRole) && (
-        <div style={{ padding: "8px 12px", background: "#fef3c7", color: "#92400e", borderRadius: "6px", fontSize: "0.85rem", marginBottom: "1rem" }}>
+      {currentRole && !["template_admin", "tmpladmin", "admin"].includes(currentRole) && (
+        <div className="template-access-note">
           🔒 Read-Only Preview Mode: Role '{currentRole}' cannot modify institutional template configurations. Switch role to 'Template Admin' or 'System Admin' to save changes.
         </div>
       )}
 
       {preview && (
-        <div style={{ display: "grid", gridTemplateColumns: "320px 1fr", gap: "20px" }}>
+        <div className="template-editor-grid">
           {/* Settings Panel */}
-          <div style={{ padding: "14px", background: "#f8fafc", borderRadius: "8px", border: "1px solid #cbd5e1" }}>
+          <div className="template-settings-card">
             <h4 style={{ fontSize: "0.95rem", fontWeight: "700", margin: "0 0 10px 0", color: "#1e293b" }}>
               ⚙️ Template Settings
             </h4>
@@ -150,8 +150,8 @@ export default function TemplateEditorPanel({ currentRole }) {
           </div>
 
           {/* Sample Preview Display */}
-          <div style={{ padding: "16px", border: "1px solid #e2e8f0", borderRadius: "8px", background: "#ffffff" }}>
-            <div style={{ padding: "8px 12px", background: "#fef3c7", color: "#b45309", borderRadius: "6px", fontSize: "0.82rem", fontWeight: "700", marginBottom: "14px" }}>
+          <div className="template-preview-paper">
+            <div className="template-preview-warning">
               ⚠️ {preview.preview_notice}
             </div>
 
@@ -164,13 +164,13 @@ export default function TemplateEditorPanel({ currentRole }) {
 
             <div style={{ fontSize: "0.88rem" }}>
               <div style={{ fontWeight: "700", color: "#1e293b", marginBottom: "8px" }}>Sample Data Values:</div>
-              <pre style={{ background: "#f8fafc", padding: "12px", borderRadius: "6px", border: "1px solid #e2e8f0", overflowX: "auto", fontSize: "0.8rem" }}>
+              <pre className="template-sample-data">
                 {JSON.stringify(preview.sample_data, null, 2)}
               </pre>
             </div>
           </div>
         </div>
       )}
-    </div>
+    </section>
   );
 }

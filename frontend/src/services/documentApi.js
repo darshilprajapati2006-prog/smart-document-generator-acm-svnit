@@ -350,6 +350,9 @@ export async function completeVerifiedAccountSetup(fullName) {
 }
 
 export async function bootstrapSystemAdmin() {
+  const readiness = await getSystemAdminBootstrapStatus();
+  if (!readiness.ready) throw new Error(readiness.reason || "System Admin bootstrap is not ready.");
+
   await authReady;
   const user = firebaseAuth.currentUser;
   if (!user) throw new Error("Sign in with your Firebase account before starting bootstrap.");
@@ -375,6 +378,24 @@ export async function bootstrapSystemAdmin() {
     throw new Error("Bootstrap returned, but the authenticated profile does not show System Admin. Do not retry; contact the administrator.");
   }
   return { ...result, user: profile.user };
+}
+
+export async function getSystemAdminBootstrapStatus() {
+  await authReady;
+  const user = firebaseAuth.currentUser;
+  if (!user) throw new Error("Sign in with your Firebase account before checking bootstrap readiness.");
+  await reload(user);
+  if (!user.emailVerified) throw new Error("Verify your Firebase email before checking bootstrap readiness.");
+  const idToken = await user.getIdToken(true);
+
+  const healthResponse = await fetch(apiUrl("/health"));
+  if (!healthResponse.ok) throw new Error("The backend health check failed.");
+  const response = await fetch(apiUrl("/api/auth/bootstrap-admin/status"), {
+    headers: { Authorization: `Bearer ${idToken}` },
+  });
+  const status = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(status.detail || "Bootstrap readiness could not be verified.");
+  return status;
 }
 
 export async function registerUser({ role, full_name, email, password, confirm_password, invitation_token }) {

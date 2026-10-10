@@ -14,7 +14,7 @@ import { isApprovedInstitutionalEmail } from "../utils/institutionalEmail";
 
 export default function LoginPage({ onLoginSuccess }) {
   const invitationToken = new URLSearchParams(window.location.hash.slice(1)).get("invite") || "";
-  const publicRoles = (import.meta.env.VITE_PUBLIC_REGISTRATION_ROLES || "author,viewer").split(",").map((role) => role.trim());
+  const publicRoles = ["author"];
   const [invitation, setInvitation] = useState(null);
   const [view, setView] = useState(invitationToken ? "signup" : "signin");
   // Views: sign in, signup, verified-account setup, verification notice, and password recovery.
@@ -255,80 +255,30 @@ export default function LoginPage({ onLoginSuccess }) {
 
   return (
     <div
-      style={{
-        minHeight: "100vh",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        background:
-          "linear-gradient(135deg, #0f172a 0%, #1e1b4b 50%, #0f172a 100%)",
-        padding: "20px",
-        fontFamily:
-          "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
-      }}
+      className="auth-page"
     >
       <div
-        style={{
-          width: "100%",
-          maxWidth: "460px",
-          background: "rgba(30, 41, 59, 0.85)",
-          backdropFilter: "blur(16px)",
-          borderRadius: "16px",
-          border: "1px solid rgba(255, 255, 255, 0.12)",
-          boxShadow: "0 25px 50px -12px rgba(0, 0, 0, 0.5)",
-          overflow: "hidden",
-        }}
+        className="auth-card"
       >
         {/* Header Branding */}
         <div
-          style={{
-            padding: "30px 32px 22px",
-            textAlign: "center",
-            borderBottom: "1px solid rgba(255, 255, 255, 0.08)",
-          }}
+          className="auth-header"
         >
-          <div
-            style={{
-              display: "inline-flex",
-              alignItems: "center",
-              justifyContent: "center",
-              width: "52px",
-              height: "52px",
-              borderRadius: "14px",
-              background: "linear-gradient(135deg, #0284c7 0%, #2563eb 100%)",
-              color: "#ffffff",
-              fontSize: "22px",
-              fontWeight: 800,
-              marginBottom: "14px",
-              boxShadow: "0 8px 16px rgba(2, 132, 199, 0.35)",
-            }}
-          >
-            S
-          </div>
+          <div className="auth-brandmarks"><img src="/branding/acm_logo.png" alt="ACM Student Chapter" /><span aria-hidden="true">×</span><img src="/branding/svnit_logo.png" alt="SVNIT Surat" /></div>
           <h2
-            style={{
-              margin: "0 0 6px 0",
-              color: "#ffffff",
-              fontSize: "1.45rem",
-              fontWeight: 700,
-              letterSpacing: "-0.02em",
-            }}
+            className="auth-title"
           >
             SmartDocs SVNIT
           </h2>
           <p
-            style={{
-              margin: 0,
-              color: "#94a3b8",
-              fontSize: "0.85rem",
-            }}
+            className="auth-subtitle"
           >
             ACM Student Chapter · Sardar Vallabhbhai NIT Surat
           </p>
         </div>
 
         {/* Global Feedback Banners */}
-        <div style={{ padding: "20px 32px 0" }}>
+        <div className="auth-feedback">
           {errorMessage && (
             <div
               role="alert"
@@ -376,10 +326,7 @@ export default function LoginPage({ onLoginSuccess }) {
         {/* VIEW 1: SIGN IN (Default)                                 */}
         {/* ========================================================= */}
         {view === "signin" && (
-          <form
-            onSubmit={handleLoginSubmit}
-            style={{ padding: "12px 32px 28px" }}
-          >
+          <form className="auth-form" onSubmit={handleLoginSubmit}>
             <div style={{ marginBottom: "18px" }}>
               <label
                 htmlFor="login-email"
@@ -546,7 +493,7 @@ export default function LoginPage({ onLoginSuccess }) {
         )}
 
         {view === "profile_setup" && (
-          <form onSubmit={handleCompleteExistingAccount} style={{ padding: "24px 32px 28px" }}>
+          <form onSubmit={handleCompleteExistingAccount} className="auth-form">
             <h3 style={{ color: "#fff", margin: "0 0 10px" }}>Finish SmartDocs setup</h3>
             <p style={{ color: "#cbd5e1", lineHeight: 1.6, margin: "0 0 18px" }}>
               Your email is verified with Firebase, but this email does not have a SmartDocs profile yet. Confirm your name to create the standard Author profile for <strong>{activeEmail}</strong> and continue.
@@ -577,10 +524,7 @@ export default function LoginPage({ onLoginSuccess }) {
         {/* VIEW 2: SIGN UP                                           */}
         {/* ========================================================= */}
         {view === "signup" && (
-          <form
-            onSubmit={handleRegisterSubmit}
-            style={{ padding: "12px 32px 28px" }}
-          >
+          <form className="auth-form" onSubmit={handleRegisterSubmit}>
             <div style={{ marginBottom: "16px" }}>
               <label
                 htmlFor="reg-role"
@@ -862,7 +806,7 @@ export default function LoginPage({ onLoginSuccess }) {
         {/* VIEW 3: EMAIL VERIFICATION LINK                           */}
         {/* ========================================================= */}
         {view === "verify_email" && (
-          <div style={{ padding: "24px 32px 32px", textAlign: "center" }}>
+          <div className="auth-message-view">
             <div style={{ fontSize: "2rem", marginBottom: "8px" }}>📧</div>
             <h3 style={{ color: "#fff", margin: "0 0 10px" }}>
               Check your inbox
@@ -928,10 +872,7 @@ export default function LoginPage({ onLoginSuccess }) {
         {/* VIEW 5: FORGOT PASSWORD                                   */}
         {/* ========================================================= */}
         {view === "forgot" && (
-          <form
-            onSubmit={handleForgotPasswordSubmit}
-            style={{ padding: "12px 32px 28px" }}
-          >
+          <form className="auth-form" onSubmit={handleForgotPasswordSubmit}>
             <div style={{ textAlign: "center", marginBottom: "18px" }}>
               <div style={{ fontSize: "2rem", marginBottom: "8px" }}>🔑</div>
               <h3
@@ -1024,14 +965,7 @@ export default function LoginPage({ onLoginSuccess }) {
         )}
 
         {/* Footer Note */}
-        <div
-          style={{
-            padding: "16px 32px 20px",
-            background: "rgba(15, 23, 42, 0.4)",
-            borderTop: "1px solid rgba(255, 255, 255, 0.08)",
-            textAlign: "center",
-          }}
-        >
+        <div className="auth-footer">
           <p
             style={{
               margin: 0,

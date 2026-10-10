@@ -120,8 +120,8 @@ export default function BatchGenerator() {
   }
 
   return (
-    <div className="batch-container" style={{ padding: "1.5rem", background: "var(--card-bg, #ffffff)", borderRadius: "12px", border: "1px solid #e2e8f0", marginTop: "1.5rem" }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1.2rem" }}>
+    <div className="batch-container page-panel batch-page">
+      <div className="page-panel-heading batch-heading">
         <div>
           <h2 style={{ fontSize: "1.3rem", fontWeight: "700", color: "#0f172a", margin: 0 }}>
             ⚡ Batch Document Generation (Feature 3)
@@ -130,7 +130,7 @@ export default function BatchGenerator() {
             Queue and generate multiple official documents concurrently with error isolation and ZIP download.
           </p>
         </div>
-        <div style={{ display: "flex", gap: "8px" }}>
+        <div className="page-panel-actions">
           <button
             type="button"
             className="secondary-btn"
@@ -159,19 +159,19 @@ export default function BatchGenerator() {
       {/* Jobs List */}
       <div style={{ display: "grid", gap: "10px", marginBottom: "1.5rem" }}>
         {jobs.map((job, idx) => (
-          <div key={job.job_id || idx} style={{ border: "1px solid #cbd5e1", borderRadius: "8px", padding: "12px", background: "#f8fafc", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-            <div>
+          <div key={job.job_id || idx} className="batch-job-row">
+            <div className="batch-job-info">
               <span style={{ fontWeight: "700", color: "#1e293b", fontSize: "0.95rem" }}>
                 Job {idx + 1}: {job.document_type === "exec_meet" ? "Executive Meet" : job.document_type === "bill_certificate" ? "Bill Certificate" : "Bill Summary"}
               </span>
-              <span style={{ marginLeft: "10px", fontSize: "0.85rem", color: "#64748b" }}>
+              <span className="batch-job-detail">
                 [{job.job_id}] — {job.payload.event_name || job.payload.supplier_name || job.payload.title || "Custom Payload"}
               </span>
             </div>
             <button
               type="button"
               onClick={() => handleRemoveJob(idx)}
-              style={{ background: "transparent", border: "none", color: "#ef4444", cursor: "pointer", fontWeight: "bold" }}
+              className="destructive-icon-button"
               title="Remove Job"
             >
               ✕
@@ -180,7 +180,7 @@ export default function BatchGenerator() {
         ))}
       </div>
 
-      <div style={{ display: "flex", gap: "12px", alignItems: "center" }}>
+      <div className="batch-generate-actions">
         <button
           type="button"
           className="primary-btn"
@@ -194,7 +194,7 @@ export default function BatchGenerator() {
 
       {/* Results View */}
       {result && (
-        <div style={{ marginTop: "1.5rem", padding: "16px", background: "#f0fdf4", border: "1px solid #bbf7d0", borderRadius: "8px" }}>
+        <div className="batch-result">
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "10px" }}>
             <div>
               <span style={{ fontWeight: "700", color: "#166534", fontSize: "1rem" }}>
@@ -217,7 +217,7 @@ export default function BatchGenerator() {
 
           <div style={{ display: "grid", gap: "8px", marginTop: "12px" }}>
             {result.jobs.map((j) => (
-              <div key={j.job_id} style={{ padding: "8px 12px", background: "#ffffff", borderRadius: "6px", border: "1px solid #e2e8f0", display: "flex", justifyContent: "space-between", fontSize: "0.88rem" }}>
+              <div key={j.job_id} className="batch-result-row">
                 <div>
                   <span style={{ fontWeight: "600" }}>{j.job_id}</span> ({j.document_type})
                   {j.status === "completed" ? (
