@@ -832,26 +832,6 @@
   .app-footer-bottom p { font-size:.68rem; }
 }
 
-/* Keep conditional form checkboxes aligned when their labels wrap on phones. */
-@media (max-width:520px) {
-  .dynamic-section-box { min-width:0; padding:12px; }
-  .section-toggle-label {
-    width:100%;
-    min-width:0;
-    box-sizing:border-box;
-    align-items:flex-start;
-    gap:10px;
-    line-height:1.5;
-  }
-  .section-toggle-label > input[type="checkbox"] {
-    width:17px;
-    height:17px;
-    flex:0 0 17px;
-    margin:2px 0 0;
-  }
-  .section-toggle-label > span { min-width:0; flex:1 1 0; overflow-wrap:anywhere; }
-}
-
 /* Dynamic Table & Form Extension Styles */
 .doc-type-pill {
   display: inline-block;
@@ -2559,7 +2539,8 @@ button:disabled,.primary-btn:disabled,.secondary-btn:disabled { opacity:.5; curs
 input[type="file"]::file-selector-button { min-height:32px; margin-right:10px; padding:0 10px; border:1px solid var(--line); border-radius:6px; color:var(--text-secondary); background:var(--surface-raised); cursor:pointer; }
 
 @media (max-width:760px) {
-  .topbar { grid-template-columns:auto auto minmax(0,1fr); }
+  .topbar { grid-template-columns:auto minmax(0,1fr) auto; }
+  .topbar-context { display:none; }
   .topbar-controls { display:flex; min-width:0; margin-left:0; }
   .topbar-controls > .account-cluster,
   .topbar-controls > .request-role-action,
