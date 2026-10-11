@@ -57,27 +57,25 @@ def is_approved_institutional_email(email: str) -> bool:
     - svnit.ac.in, *.svnit.ac.in (e.g. aid.svnit.ac.in, coed.svnit.ac.in, etc.)
     - svnit.acm.org, *.svnit.acm.org
     - acm.org
-    Or custom domains in ALLOWED_EMAIL_DOMAINS env var.
-    Registration is always restricted to institutional domains.
+    Plus any custom domains in ALLOWED_EMAIL_DOMAINS env var.
     """
+    if not email or "@" not in email:
+        return False
+    domain = email.lower().split("@")[-1].strip()
+
+    # Always allow institutional SVNIT and ACM domains
+    approved_roots = {"svnit.ac.in", "svnit.acm.org", "acm.org"}
+    for root in approved_roots:
+        if domain == root or domain.endswith("." + root):
+            return True
+
+    # Also check additional custom domains configured in ALLOWED_EMAIL_DOMAINS
     allowed_env = os.getenv("ALLOWED_EMAIL_DOMAINS", "").strip()
     if allowed_env:
         allowed_list = [d.strip().lower() for d in allowed_env.split(",") if d.strip()]
-        domain = email.lower().split("@")[-1]
         for allowed in allowed_list:
             if domain == allowed or domain.endswith("." + allowed):
                 return True
-        return False
-
-    domain = email.lower().split("@")[-1]
-    if (
-        domain == "svnit.ac.in"
-        or domain.endswith(".svnit.ac.in")
-        or domain == "svnit.acm.org"
-        or domain.endswith(".svnit.acm.org")
-        or domain == "acm.org"
-    ):
-        return True
 
     return False
 
@@ -233,19 +231,24 @@ def register_user(request: UserRegisterRequest, authorization: Optional[str] = H
         if existing:
             if existing["firebase_uid"] and existing["firebase_uid"] != claims["uid"]:
                 raise HTTPException(status_code=409, detail="An account already exists for this email. Contact an administrator.")
-            if existing["role"] not in {"author", "viewer"} and not invitation:
-                raise HTTPException(status_code=409, detail="An account already exists for this email. Contact an administrator.")
-            # Never claim even an Author profile until Firebase confirms mailbox ownership.
+            # Never claim profile until Firebase confirms mailbox ownership.
             if not claims.get("email_verified"):
                 raise HTTPException(status_code=403, detail="Verify your email address before completing registration.")
             if invitation:
-                conn.execute("UPDATE users SET firebase_uid = ?, role = ? WHERE id = ?", (claims["uid"], assigned_role, existing["id"]))
+                conn.execute("UPDATE users SET firebase_uid = ?, role = ?, is_verified = 1, status = 'active' WHERE id = ?", (claims["uid"], assigned_role, existing["id"]))
             else:
-                conn.execute("UPDATE users SET firebase_uid = ? WHERE id = ?", (claims["uid"], existing["id"]))
+                conn.execute("UPDATE users SET firebase_uid = ?, is_verified = 1, status = 'active' WHERE id = ?", (claims["uid"], existing["id"]))
         else:
+            has_admin = conn.execute("SELECT 1 FROM users WHERE role = 'admin' AND is_active = 1").fetchone() is not None
+            bootstrap_email = os.getenv("ADMIN_BOOTSTRAP_EMAIL", "admin@svnit.acm.org").strip().lower()
+            if not has_admin and (email == "admin@svnit.acm.org" or email == bootstrap_email):
+                assigned_role = "admin"
+
+            is_verified = 1 if claims.get("email_verified") else 0
+            status = "active" if is_verified else "pending_verification"
             conn.execute(
-                "INSERT INTO users (id,email,hashed_password,full_name,role,status,is_active,is_verified,firebase_uid) VALUES (?,?,?,?,?,'pending_verification',1,0,?)",
-                (claims["uid"], email, "firebase-managed", request.full_name.strip(), assigned_role, claims["uid"]),
+                "INSERT INTO users (id,email,hashed_password,full_name,role,status,is_active,is_verified,firebase_uid) VALUES (?,?,?,?,?,?,1,?,?)",
+                (claims["uid"], email, "firebase-managed", request.full_name.strip(), assigned_role, status, is_verified, claims["uid"]),
             )
         if invitation:
             used = conn.execute(
@@ -332,7 +335,18 @@ def create_firebase_session(authorization: Optional[str] = Header(None)):
     with get_db() as conn:
         row = conn.execute("SELECT * FROM users WHERE firebase_uid = ? OR email = ?", (claims["uid"], email)).fetchone()
         if not row:
-            raise HTTPException(status_code=403, detail="No SmartDocs account found. Create an account first.")
+            has_admin = conn.execute("SELECT 1 FROM users WHERE role = 'admin' AND is_active = 1").fetchone() is not None
+            bootstrap_email = os.getenv("ADMIN_BOOTSTRAP_EMAIL", "admin@svnit.acm.org").strip().lower()
+            if not has_admin and (email == "admin@svnit.acm.org" or email == bootstrap_email):
+                user_id = f"usr-{uuid.uuid4().hex[:12]}"
+                full_name = claims.get("name") or "System Administrator"
+                conn.execute(
+                    "INSERT INTO users (id, email, hashed_password, full_name, role, status, is_active, is_verified, firebase_uid) VALUES (?, ?, 'firebase-managed', ?, 'admin', 'active', 1, 1, ?)",
+                    (user_id, email, full_name, claims["uid"])
+                )
+                row = conn.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
+            else:
+                raise HTTPException(status_code=403, detail="No SmartDocs account found. Create an account first.")
         if row["email"].strip().lower() != email:
             raise HTTPException(status_code=403, detail="Firebase account email does not match the SmartDocs profile.")
         if row["firebase_uid"] and row["firebase_uid"] != claims["uid"]:

@@ -109,7 +109,8 @@ export default function LoginPage({ onLoginSuccess }) {
       localStorage.setItem("acm_doc_user", JSON.stringify(data.user));
       if (onLoginSuccess) onLoginSuccess(data.user);
     } catch (err) {
-      setErrorMessage(err.message || "Could not complete your SmartDocs profile.");
+      const msg = typeof err?.message === "string" ? err.message : JSON.stringify(err?.message || err);
+      setErrorMessage(msg || "Could not complete your SmartDocs profile.");
     } finally {
       setLoading(false);
     }
