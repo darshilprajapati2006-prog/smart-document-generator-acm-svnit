@@ -59,6 +59,16 @@ def test_prize_money_receipt_generation_and_download():
     assert docx_response.status_code == pdf_response.status_code == 200
     assert len(pdf_response.content) > 1000
     assert pdf_response.content.startswith(b"%PDF-")
+    assert b"%%EOF" in pdf_response.content[-1024:]
+    try:
+        from pypdf import PdfReader
+    except ImportError:
+        PdfReader = None
+    if PdfReader:
+        receipt_text = "\n".join(page.extract_text() or "" for page in PdfReader(BytesIO(pdf_response.content)).pages)
+        assert "SVNIT Innovation Challenge" in receipt_text
+        assert "Test Student" in receipt_text
+        assert "I26AI007" in receipt_text
     doc = Document(BytesIO(docx_response.content))
     text = "\n".join(p.text for p in doc.paragraphs)
     text += "\n" + "\n".join(cell.text for table in doc.tables for row in table.rows for cell in row.cells)
@@ -127,12 +137,24 @@ def test_executive_meet_generation(tmp_path):
     dl_pdf = client.get(f"/api/documents/download/{doc_id}/pdf")
     assert dl_pdf.status_code == 200
     assert dl_pdf.headers["content-type"] == "application/pdf"
+    assert dl_pdf.headers["content-disposition"].lower().endswith(".pdf\"")
+    assert dl_pdf.content.startswith(b"%PDF-") and b"%%EOF" in dl_pdf.content[-1024:]
+    try:
+        from pypdf import PdfReader
+    except ImportError:
+        PdfReader = None
+    if PdfReader:
+        certificate_text = "\n".join(page.extract_text() or "" for page in PdfReader(BytesIO(dl_pdf.content)).pages)
+        assert "Stationery & Tech Supplies Ltd." in certificate_text
+        assert "Item Alpha" in certificate_text and "Item Beta" in certificate_text
+    assert dl_pdf.headers["content-type"] == "application/pdf"
     assert len(dl_pdf.content) > 1000
 
-def test_approved_current_version_pdf_download_is_valid_and_access_controlled():
+def test_authenticated_current_version_pdf_and_docx_downloads_are_valid_and_access_controlled(monkeypatch):
     import shutil
     import subprocess
     from app.db.database import get_db
+    monkeypatch.setenv("ADMIN_BOOTSTRAP_EMAIL", "admin@svnit.acm.org")
 
     payload = {
         "ref_no": "ACM/26-27/PDF/001",
@@ -156,24 +178,38 @@ def test_approved_current_version_pdf_download_is_valid_and_access_controlled():
     doc_id = generated.json()["repository_id"]
     download_url = f"/api/documents/{doc_id}/download/pdf"
 
-    # A generated file is not downloadable as an approved document until workflow approval.
+    # The Author can download the canonical files immediately, before review.
     draft_download = client.get(download_url)
-    assert draft_download.status_code == 409
+    assert draft_download.status_code == 200
+    assert draft_download.content.startswith(b"%PDF-")
+    assert client.get(f"/api/documents/{doc_id}/download/docx").status_code == 200
+    unauthenticated = TestClient(app).get(download_url)
+    assert unauthenticated.status_code == 401
 
     author_headers = {"Authorization": "Bearer test-firebase:usr-author-01:author@svnit.acm.org:1"}
     reviewer_headers = {"Authorization": "Bearer test-firebase:usr-reviewer-01:reviewer@svnit.acm.org:1"}
     approver_headers = {"Authorization": "Bearer test-firebase:usr-approver-01:approver@svnit.acm.org:1"}
+    # A downstream role cannot skip a required stage.
+    premature_approval = client.post(
+        f"/api/documents/{doc_id}/workflow/transition",
+        headers=approver_headers,
+        json={"target_status": "approver_approved", "comment": "Must be blocked before review"},
+    )
+    assert premature_approval.status_code == 409
     for target_status, headers in (
         ("ready_for_review", author_headers),
         ("in_review", reviewer_headers),
-        ("approved", approver_headers),
+        ("review_approved", reviewer_headers),
+        ("approver_approved", approver_headers),
+        ("template_approved", {"Authorization": "Bearer test-firebase:usr-tmpladmin-01:tmpladmin@svnit.acm.org:1"}),
+        ("approved", {"Authorization": "Bearer test-firebase:usr-admin-01:admin@svnit.acm.org:1"}),
     ):
         transition = client.post(
             f"/api/documents/{doc_id}/workflow/transition",
             headers=headers,
             json={"target_status": target_status, "comment": "PDF workflow test"},
         )
-        assert transition.status_code == 200, transition.text
+        assert transition.status_code == 200, f"{target_status}: {transition.text}"
 
     pdf_response = client.get(download_url, headers=author_headers)
     assert pdf_response.status_code == 200
@@ -188,6 +224,21 @@ def test_approved_current_version_pdf_download_is_valid_and_access_controlled():
         ).fetchone()
     generated_pdf_path = Path(version["pdf_path"])
     assert pdf_response.content == generated_pdf_path.read_bytes()
+    docx_response = client.get(f"/api/documents/{doc_id}/download/docx", headers=reviewer_headers)
+    assert docx_response.status_code == 200
+    assert docx_response.headers["content-type"] == "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    assert docx_response.headers["content-disposition"].lower().endswith(".docx\"")
+    assert docx_response.content.startswith(b"PK")
+    # Every workflow participant can access that same canonical PDF version.
+    for participant_headers in (
+        reviewer_headers,
+        approver_headers,
+        {"Authorization": "Bearer test-firebase:usr-tmpladmin-01:tmpladmin@svnit.acm.org:1"},
+        {"Authorization": "Bearer test-firebase:usr-admin-01:admin@svnit.acm.org:1"},
+    ):
+        participant_pdf = client.get(download_url, headers=participant_headers)
+        assert participant_pdf.status_code == 200
+        assert participant_pdf.content == pdf_response.content
     file_command = shutil.which("file")
     if file_command:
         description = subprocess.run(
@@ -251,6 +302,16 @@ def test_bill_certificate_calculation_and_generation():
     assert dl_docx.status_code == 200
     dl_pdf = client.get(f"/api/documents/download/{doc_id}/pdf")
     assert dl_pdf.status_code == 200
+    assert dl_pdf.headers["content-type"] == "application/pdf"
+    assert dl_pdf.headers["content-disposition"].lower().endswith(".pdf\"")
+    assert dl_pdf.content.startswith(b"%PDF-") and b"%%EOF" in dl_pdf.content[-1024:]
+    try:
+        from pypdf import PdfReader
+    except ImportError:
+        PdfReader = None
+    if PdfReader:
+        summary_text = "\n".join(page.extract_text() or "" for page in PdfReader(BytesIO(dl_pdf.content)).pages)
+        assert "Team Codex" in summary_text and "Team Algo" in summary_text
 
 def test_bill_certificate_invalid_items():
     payload = {

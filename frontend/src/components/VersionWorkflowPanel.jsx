@@ -7,10 +7,11 @@ import {
   fetchWorkflowHistory,
   signDocument,
   verifySignature,
-  downloadApprovedDocumentPdf,
+  downloadDocumentFile,
   exportToGoogleDrive,
   distributeByEmail
 } from "../services/documentApi";
+import { getWorkflowActions } from "../utils/workflowActions.js";
 
 export default function VersionWorkflowPanel({ documentId, role }) {
   const [documents, setDocuments] = useState([]);
@@ -18,7 +19,8 @@ export default function VersionWorkflowPanel({ documentId, role }) {
   const [versions, setVersions] = useState([]);
   const [workflowLogs, setWorkflowLogs] = useState([]);
   const [loading, setLoading] = useState(false);
-  const [downloadingPdf, setDownloadingPdf] = useState(false);
+  const [downloadingFormat, setDownloadingFormat] = useState("");
+  const [pdfPreviewUrl, setPdfPreviewUrl] = useState("");
   const [actionFeedback, setActionFeedback] = useState({ type: "", message: "" });
 
   // Transition form
@@ -156,10 +158,10 @@ export default function VersionWorkflowPanel({ documentId, role }) {
     }
   }
 
-  async function handleDownloadPdf() {
-    setDownloadingPdf(true);
+  async function handleDownload(fileFormat) {
+    setDownloadingFormat(fileFormat);
     try {
-      const { blob, filename } = await downloadApprovedDocumentPdf(selectedDocId);
+      const { blob, filename } = await downloadDocumentFile(selectedDocId, fileFormat);
       const objectUrl = URL.createObjectURL(blob);
       const anchor = window.document.createElement("a");
       anchor.href = objectUrl;
@@ -169,11 +171,27 @@ export default function VersionWorkflowPanel({ documentId, role }) {
       anchor.click();
       anchor.remove();
       window.setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
-      setActionFeedback({ type: "success", message: "Approved PDF downloaded." });
+      setActionFeedback({ type: "success", message: `${fileFormat.toUpperCase()} downloaded.` });
     } catch (err) {
-      setActionFeedback({ type: "error", message: err.message || "Unable to download the approved PDF." });
+      setActionFeedback({ type: "error", message: err.message || `Unable to download the ${fileFormat.toUpperCase()}.` });
     } finally {
-      setDownloadingPdf(false);
+      setDownloadingFormat("");
+    }
+  }
+
+  async function handlePreviewPdf() {
+    setDownloadingFormat("preview");
+    try {
+      const { blob } = await downloadDocumentFile(selectedDocId, "pdf");
+      setPdfPreviewUrl((previousUrl) => {
+        if (previousUrl) URL.revokeObjectURL(previousUrl);
+        return URL.createObjectURL(blob);
+      });
+      setActionFeedback({ type: "success", message: "Current PDF opened for preview." });
+    } catch (err) {
+      setActionFeedback({ type: "error", message: err.message || "Unable to open this PDF." });
+    } finally {
+      setDownloadingFormat("");
     }
   }
 
@@ -195,6 +213,17 @@ export default function VersionWorkflowPanel({ documentId, role }) {
   }
 
   const activeDoc = documents.find(d => d.id === selectedDocId);
+  const stageActions = getWorkflowActions(activeDoc, role);
+
+  useEffect(() => {
+    if (stageActions.length && !stageActions.some((action) => action.value === targetStatus)) {
+      setTargetStatus(stageActions[0].value);
+    }
+  }, [activeDoc?.id, activeDoc?.workflow_stage, activeDoc?.status, role]);
+
+  useEffect(() => () => {
+    if (pdfPreviewUrl) URL.revokeObjectURL(pdfPreviewUrl);
+  }, [pdfPreviewUrl]);
 
   return (
     <section className="page-panel version-page">
@@ -301,12 +330,29 @@ export default function VersionWorkflowPanel({ documentId, role }) {
                     <button
                       type="button"
                       className="secondary-btn"
-                      onClick={handleDownloadPdf}
-                      disabled={activeDoc.status !== "approved" || downloadingPdf}
-                      title={activeDoc.status !== "approved" ? "Available after the current version is approved" : "Download the approved PDF to this device"}
+                      onClick={handlePreviewPdf}
+                      disabled={Boolean(downloadingFormat)}
                       style={{ padding: "6px 12px", fontSize: "0.82rem" }}
                     >
-                      {downloadingPdf ? "Preparing PDF…" : "⬇ Download PDF"}
+                      {downloadingFormat === "preview" ? "Opening PDF…" : "View PDF"}
+                    </button>
+                    <button
+                      type="button"
+                      className="secondary-btn"
+                      onClick={() => handleDownload("pdf")}
+                      disabled={Boolean(downloadingFormat)}
+                      style={{ padding: "6px 12px", fontSize: "0.82rem" }}
+                    >
+                      {downloadingFormat === "pdf" ? "Preparing PDF…" : "⬇ Download PDF"}
+                    </button>
+                    <button
+                      type="button"
+                      className="secondary-btn"
+                      onClick={() => handleDownload("docx")}
+                      disabled={Boolean(downloadingFormat)}
+                      style={{ padding: "6px 12px", fontSize: "0.82rem" }}
+                    >
+                      {downloadingFormat === "docx" ? "Preparing DOCX…" : "⬇ Download DOCX"}
                     </button>
                     <button type="button" className="secondary-btn" onClick={handleExportDrive} style={{ padding: "6px 12px", fontSize: "0.82rem" }}>
                       ☁️ Export Drive
@@ -352,31 +398,35 @@ export default function VersionWorkflowPanel({ documentId, role }) {
                 {/* Section B: Approval Workflow Transition */}
                 <div className="workflow-panel">
                   <h4 style={{ fontSize: "0.95rem", fontWeight: "700", color: "#1e293b", margin: "0 0 10px 0" }}>
-                    🔄 Review & Approval Lifecycle (Active Status: <span style={{ color: "#2563eb" }}>{activeDoc.status}</span>)
+                    🔄 Review & Approval Lifecycle (Stage: <span style={{ color: "#2563eb" }}>{(activeDoc.workflow_stage || "author").replaceAll("_", " ")}</span> · Status: <span style={{ color: "#2563eb" }}>{activeDoc.status}</span>)
                   </h4>
-                  <form onSubmit={handleTransitionSubmit} style={{ display: "flex", gap: "10px", flexWrap: "wrap", alignItems: "center" }}>
+                  {stageActions.length > 0 ? <form onSubmit={handleTransitionSubmit} style={{ display: "flex", gap: "10px", flexWrap: "wrap", alignItems: "center" }}>
                     <select
                       value={targetStatus}
                       onChange={(e) => setTargetStatus(e.target.value)}
                       style={{ padding: "8px 12px", borderRadius: "6px", border: "1px solid #cbd5e1", fontSize: "0.88rem" }}
                     >
-                      <option value="ready_for_review">Ready for Review (Author)</option>
-                      <option value="in_review">In Review (Reviewer/Approver)</option>
-                      <option value="approved">Approved (Approver)</option>
-                      <option value="changes_requested">Changes Requested (Reviewer/Approver)</option>
-                      <option value="rejected">Rejected (Approver)</option>
+                      {stageActions.map((action) => <option key={action.value} value={action.value}>{action.label}</option>)}
                     </select>
                     <input
                       type="text"
-                      placeholder="Reviewer comments or revision notes..."
+                      placeholder="Review comments or revision notes..."
                       value={comment}
                       onChange={(e) => setComment(e.target.value)}
                       style={{ flex: 1, minWidth: "220px", padding: "8px 12px", borderRadius: "6px", border: "1px solid #cbd5e1", fontSize: "0.88rem" }}
                     />
-                    <button type="submit" className="primary-btn" style={{ padding: "8px 16px", fontSize: "0.88rem" }}>
-                      Submit Status
+                    <button type="submit" className="primary-btn" disabled={loading} style={{ padding: "8px 16px", fontSize: "0.88rem" }}>
+                      Submit decision
                     </button>
-                  </form>
+                  </form> : <p style={{ color: "#64748b", margin: "4px 0 12px" }}>
+                    {activeDoc.status === "approved"
+                      ? (workflowLogs[workflowLogs.length - 1]?.actor_role === "admin" && workflowLogs[workflowLogs.length - 1]?.action === "approved"
+                        ? "Workflow complete: this version has final System Admin approval."
+                        : "This version is marked approved in its existing workflow history.")
+                      : activeDoc.status === "rejected"
+                        ? "This document was rejected by the Approver. An Author can create a revised version to restart review."
+                        : `Waiting for the ${activeDoc.workflow_stage || "author"} stage. Authorized participants can view and download the current files above.`}
+                  </p>}
 
                   {/* Audit Logs */}
                   {workflowLogs.length > 0 && (
@@ -386,7 +436,7 @@ export default function VersionWorkflowPanel({ documentId, role }) {
                       </div>
                       {workflowLogs.map((log) => (
                         <div key={log.id} style={{ fontSize: "0.8rem", color: "#475569", marginBottom: "4px" }}>
-                          • <b>{log.actor_name}</b> ({log.actor_role}): {log.from_status} ➔ <b>{log.to_status}</b> {log.comment ? `("${log.comment}")` : ""} <span style={{ color: "#94a3b8" }}>[{log.created_at}]</span>
+                          • <b>{log.actor_name}</b> ({log.actor_role}): {log.from_stage ? `${log.from_stage} · ` : ""}{log.from_status} ➔ <b>{log.to_stage ? `${log.to_stage} · ` : ""}{log.to_status}</b> {log.comment ? `("${log.comment}")` : ""} <span style={{ color: "#94a3b8" }}>[{log.created_at}]</span>
                         </div>
                       ))}
                     </div>
@@ -423,6 +473,18 @@ export default function VersionWorkflowPanel({ documentId, role }) {
                 </div>
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {pdfPreviewUrl && (
+        <div role="dialog" aria-modal="true" aria-label="PDF document preview" className="pdf-preview-backdrop" onClick={() => setPdfPreviewUrl("")}>
+          <div className="pdf-preview-dialog" onClick={(event) => event.stopPropagation()}>
+            <div className="pdf-preview-header">
+              <strong>{activeDoc?.title || "Document PDF"} · v{activeDoc?.current_version}</strong>
+              <button type="button" className="secondary-btn" onClick={() => setPdfPreviewUrl("")}>Close preview</button>
+            </div>
+            <iframe title="Current canonical document PDF" src={pdfPreviewUrl} className="pdf-preview-frame" />
           </div>
         </div>
       )}

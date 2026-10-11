@@ -98,17 +98,16 @@ class DocumentRepository:
             new_version_num = doc_row["current_version"] + 1
             version_id = f"ver-{uuid.uuid4().hex[:12]}"
             
-            # If document was previously approved, modifying source data transitions it back to draft/review
-            new_status = doc_row["status"]
-            if new_status == "approved":
-                new_status = "changes_requested"
+            # Any new source version invalidates in-flight approvals and returns
+            # the document to its Author for a fresh review cycle.
+            new_status = "draft" if doc_row["status"] == "draft" else "changes_requested"
             
             updated_title = title or doc_row["title"]
 
             conn.execute(
                 """
                 UPDATE documents
-                SET current_version = ?, status = ?, title = ?, updated_at = CURRENT_TIMESTAMP
+                SET current_version = ?, status = ?, workflow_stage = 'author', title = ?, updated_at = CURRENT_TIMESTAMP
                 WHERE id = ?
                 """,
                 (new_version_num, new_status, updated_title, doc_id)

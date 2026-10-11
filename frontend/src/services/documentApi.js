@@ -1,5 +1,6 @@
 import { firebaseAuth, authReady } from "./firebase";
 import { AUTH_SESSION_PATH, postAuthSession, BOOTSTRAP_ADMIN_PATH, postBootstrapAdmin } from "./authEndpoints.js";
+import { fetchAuthenticatedDocumentFile } from "../utils/downloadFile.js";
 import {
   createUserWithEmailAndPassword,
   updateProfile,
@@ -189,34 +190,33 @@ export async function fetchDocumentVersions(docId) {
   return res.json();
 }
 
+export async function downloadDocumentFile(docId, fileFormat = "pdf") {
+  await authReady;
+  const user = firebaseAuth.currentUser;
+  if (!user) throw new Error("Your sign-in session has expired. Sign in again to download this document.");
+  // Firebase refreshes an expired ID token when getIdToken() is called.
+  const token = await user.getIdToken();
+  setAuthToken(token);
+  return fetchAuthenticatedDocumentFile(
+    fetch,
+    apiUrl(`/api/documents/${encodeURIComponent(docId)}/download/${String(fileFormat).toLowerCase()}`),
+    token,
+    fileFormat,
+  );
+}
+
+// Backward-compatible name for existing callers; downloads are available at every workflow stage.
 export async function downloadApprovedDocumentPdf(docId) {
-  const res = await fetch(apiUrl(`/api/documents/${encodeURIComponent(docId)}/download/pdf`), {
-    headers: getHeaders(),
-    cache: "no-store",
-  });
-  if (!res.ok) {
-    const error = await res.json().catch(() => ({}));
-    throw new Error(formatApiError(error, "Unable to download the approved PDF."));
-  }
+  return downloadDocumentFile(docId, "pdf");
+}
 
-  if (!res.headers.get("content-type")?.toLowerCase().startsWith("application/pdf")) {
-    throw new Error("The server did not return a PDF file.");
-  }
-  const blob = await res.blob();
-  if (await blob.slice(0, 5).text() !== "%PDF-") {
-    throw new Error("The downloaded file is not a valid PDF.");
-  }
-
-  const disposition = res.headers.get("content-disposition") || "";
-  const encodedName = disposition.match(/filename\*=UTF-8''([^;]+)/i)?.[1];
-  const plainName = disposition.match(/filename="?([^";]+)"?/i)?.[1];
-  let filename = "approved-document.pdf";
-  try {
-    filename = encodedName ? decodeURIComponent(encodedName) : (plainName || filename);
-  } catch {
-    filename = plainName || filename;
-  }
-  return { blob, filename };
+export async function downloadGeneratedFile(downloadUrl, fileFormat) {
+  await authReady;
+  const user = firebaseAuth.currentUser;
+  if (!user) throw new Error("Your sign-in session has expired. Sign in again to download this document.");
+  const token = await user.getIdToken();
+  setAuthToken(token);
+  return fetchAuthenticatedDocumentFile(fetch, apiUrl(downloadUrl), token, fileFormat);
 }
 
 export async function fetchDocumentVersionDetail(docId, versionNum) {

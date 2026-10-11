@@ -263,6 +263,8 @@ def test_approval_workflow_lifecycle_and_permissions():
     author_headers = get_auth_header(role="author", user_id="usr-author-01")
     reviewer_headers = get_auth_header(role="reviewer", user_id="usr-reviewer-01")
     approver_headers = get_auth_header(role="approver", user_id="usr-approver-01")
+    template_admin_headers = get_auth_header(role="template_admin", user_id="usr-tmpladmin-01")
+    admin_headers = get_auth_header(role="admin", user_id="usr-admin-01")
     viewer_headers = get_auth_header(role="viewer", user_id="usr-viewer-01")
 
     # Author moves Draft -> Ready for Review
@@ -280,25 +282,96 @@ def test_approval_workflow_lifecycle_and_permissions():
     }, headers=reviewer_headers)
     assert r2.status_code == 200
 
-    # Unauthorized role (viewer) attempting approval is blocked (403)
+    # A downstream role cannot skip the reviewer stage.
+    r_skip = client.post(f"/api/documents/{repo_id}/workflow/transition", json={
+        "target_status": "approver_approved",
+        "comment": "Must not skip reviewer",
+    }, headers=approver_headers)
+    assert r_skip.status_code == 409
+
+    # Unauthorized role (viewer) attempting approval is blocked.
     r_unauth = client.post(f"/api/documents/{repo_id}/workflow/transition", json={
-        "target_status": "approved",
+        "target_status": "review_approved",
         "comment": "Illegal approval"
     }, headers=viewer_headers)
     assert r_unauth.status_code == 403
 
-    # Approver approves document
+    # Reviewer approval hands off to Approver, not directly to final status.
+    r_review = client.post(f"/api/documents/{repo_id}/workflow/transition", json={
+        "target_status": "review_approved",
+        "comment": "Review complete",
+    }, headers=reviewer_headers)
+    assert r_review.status_code == 200
+    assert r_review.json()["to_stage"] == "approver"
+    assert r_review.json()["to_status"] == "in_review"
+
+    early_template = client.post(f"/api/documents/{repo_id}/workflow/transition", json={
+        "target_status": "template_approved",
+    }, headers=template_admin_headers)
+    assert early_template.status_code == 409
+
+    # Approver hands off to Template Admin.
+    r_approver = client.post(f"/api/documents/{repo_id}/workflow/transition", json={
+        "target_status": "approver_approved",
+        "comment": "Approver decision",
+    }, headers=approver_headers)
+    assert r_approver.status_code == 200
+    assert r_approver.json()["to_stage"] == "template_admin"
+
+    early_admin = client.post(f"/api/documents/{repo_id}/workflow/transition", json={
+        "target_status": "approved",
+    }, headers=admin_headers)
+    assert early_admin.status_code == 409
+
+    # Template Admin hands off to System Admin for final approval.
+    r_template = client.post(f"/api/documents/{repo_id}/workflow/transition", json={
+        "target_status": "template_approved",
+        "comment": "Official template checked",
+    }, headers=template_admin_headers)
+    assert r_template.status_code == 200
+    assert r_template.json()["to_stage"] == "admin"
+
     r3 = client.post(f"/api/documents/{repo_id}/workflow/transition", json={
         "target_status": "approved",
-        "comment": "Official hall reservation approved"
-    }, headers=approver_headers)
+        "comment": "Final System Admin approval"
+    }, headers=admin_headers)
     assert r3.status_code == 200
     assert r3.json()["to_status"] == "approved"
+    assert r3.json()["to_stage"] == "completed"
 
     # Check workflow audit history
     hist = client.get(f"/api/documents/{repo_id}/workflow/history")
     assert hist.status_code == 200
-    assert len(hist.json()["history"]) >= 3
+    assert len(hist.json()["history"]) == 6
+    assert [event["actor_role"] for event in hist.json()["history"]] == [
+        "author", "reviewer", "reviewer", "approver", "template_admin", "admin"
+    ]
+    assert [(event["from_stage"], event["to_stage"]) for event in hist.json()["history"]] == [
+        ("author", "reviewer"), ("reviewer", "reviewer"), ("reviewer", "approver"),
+        ("approver", "template_admin"), ("template_admin", "admin"), ("admin", "completed"),
+    ]
+
+    # An Author revision after final approval creates a new canonical version
+    # and returns it to the Author stage without erasing prior approval history.
+    revision = client.put(f"/api/documents/{repo_id}", headers=author_headers, json={
+        "data": {
+            "date": "10/10/2026",
+            "event_name": "Approval Flow Test - revised",
+            "venue": "Hall C",
+            "event_date": "21/10/2026",
+            "brief_description": "Revised description",
+            "objective": "Revised objective",
+        },
+        "change_summary": "Author updated the event details",
+    })
+    assert revision.status_code == 200, revision.text
+    assert revision.json()["document"]["current_version"] == 2
+    assert revision.json()["document"]["status"] == "changes_requested"
+    assert revision.json()["document"]["workflow_stage"] == "author"
+    versions = client.get(f"/api/documents/{repo_id}/versions", headers=author_headers)
+    assert [version["version_num"] for version in versions.json()["versions"]] == [2, 1]
+    history_after_revision = client.get(f"/api/documents/{repo_id}/workflow/history", headers=author_headers)
+    assert len(history_after_revision.json()["history"]) == 6
 
 # ============================================================
 # FEATURE 6: REUSABLE CLAUSES AND SECTIONS

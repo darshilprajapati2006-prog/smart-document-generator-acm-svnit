@@ -24,7 +24,7 @@ import {
   exportToGoogleDrive,
   distributeByEmail,
   signDocument,
-  getFullDownloadUrl,
+  downloadGeneratedFile,
 } from "./services/documentApi";
 
 // Document-generation priorities. Submitted opens the existing workflow history.
@@ -399,6 +399,7 @@ export default function App() {
   const mobileNavRef = useRef(null);
   const [selectedDocIdForHistory, setSelectedDocIdForHistory] = useState("");
   const [actionStatus, setActionStatus] = useState(null);
+  const [downloadingFormat, setDownloadingFormat] = useState("");
   const [apiHealthStatus, setApiHealthStatus] = useState("checking");
   const [emailModalOpen, setEmailModalOpen] = useState(false);
   const [emailTo, setEmailTo] = useState("");
@@ -1148,6 +1149,32 @@ export default function App() {
       setError(`Document generation failed: ${err.message}`);
     } finally {
       setIsGenerating(false);
+    }
+  }
+
+  async function handleGeneratedFileDownload(fileFormat) {
+    if (!generatedResult?.files?.[fileFormat]?.download_url || downloadingFormat) return;
+    setDownloadingFormat(fileFormat);
+    setActionStatus({ type: "info", message: `Preparing the ${fileFormat.toUpperCase()} download…` });
+    try {
+      const { blob, filename } = await downloadGeneratedFile(
+        generatedResult.files[fileFormat].download_url,
+        fileFormat,
+      );
+      const objectUrl = URL.createObjectURL(blob);
+      const anchor = window.document.createElement("a");
+      anchor.href = objectUrl;
+      anchor.download = filename;
+      anchor.style.display = "none";
+      window.document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      window.setTimeout(() => URL.revokeObjectURL(objectUrl), 1500);
+      setActionStatus({ type: "success", message: `${fileFormat.toUpperCase()} downloaded successfully.` });
+    } catch (downloadError) {
+      setActionStatus({ type: "error", message: downloadError.message || `Unable to download ${fileFormat.toUpperCase()}.` });
+    } finally {
+      setDownloadingFormat("");
     }
   }
 
@@ -2653,30 +2680,34 @@ export default function App() {
 
                   <div className="download-grid">
                     {/* DOCX Card */}
-                    <a
+                    <button
+                      type="button"
                       className="download-card docx"
-                      href={getFullDownloadUrl(generatedResult.files.docx.download_url)}
-                      download={generatedResult.files.docx.filename}
+                      onClick={() => handleGeneratedFileDownload("docx")}
+                      disabled={Boolean(downloadingFormat)}
+                      style={{ width: "100%", font: "inherit", textAlign: "left", cursor: downloadingFormat ? "wait" : "pointer" }}
                     >
                       <div className="dl-info">
                         <strong>📘 Word Document (.docx)</strong>
                         <small>{generatedResult.files.docx.filename}</small>
                       </div>
-                      <span className="dl-action">Download DOCX ↓</span>
-                    </a>
+                      <span className="dl-action">{downloadingFormat === "docx" ? "Preparing…" : "Download DOCX ↓"}</span>
+                    </button>
 
                     {/* PDF Card */}
-                    <a
+                    <button
+                      type="button"
                       className="download-card pdf"
-                      href={getFullDownloadUrl(generatedResult.files.pdf.download_url)}
-                      download={generatedResult.files.pdf.filename}
+                      onClick={() => handleGeneratedFileDownload("pdf")}
+                      disabled={Boolean(downloadingFormat)}
+                      style={{ width: "100%", font: "inherit", textAlign: "left", cursor: downloadingFormat ? "wait" : "pointer" }}
                     >
                       <div className="dl-info">
                         <strong>📕 PDF Document (.pdf)</strong>
                         <small>{generatedResult.files.pdf.filename}</small>
                       </div>
-                      <span className="dl-action">Download PDF ↓</span>
-                    </a>
+                      <span className="dl-action">{downloadingFormat === "pdf" ? "Preparing…" : "Download PDF ↓"}</span>
+                    </button>
                   </div>
 
                   {/* GOOD TO HAVE EXTERNAL WORKFLOW ACTIONS */}

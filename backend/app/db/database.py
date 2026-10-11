@@ -173,11 +173,21 @@ def init_db():
             document_type TEXT NOT NULL,
             title TEXT NOT NULL,
             status TEXT NOT NULL DEFAULT 'draft' CHECK(status IN ('draft', 'ready_for_review', 'in_review', 'approved', 'changes_requested', 'rejected')),
+            workflow_stage TEXT NOT NULL DEFAULT 'author',
             current_version INTEGER NOT NULL DEFAULT 1,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
         """)
+        document_columns = {row["name"] for row in conn.execute("PRAGMA table_info(documents)").fetchall()}
+        if "workflow_stage" not in document_columns:
+            conn.execute("ALTER TABLE documents ADD COLUMN workflow_stage TEXT NOT NULL DEFAULT 'author'")
+            conn.execute("UPDATE documents SET workflow_stage = CASE status "
+                         "WHEN 'ready_for_review' THEN 'reviewer' "
+                         "WHEN 'in_review' THEN 'reviewer' "
+                         "WHEN 'changes_requested' THEN 'author' "
+                         "WHEN 'approved' THEN 'completed' "
+                         "WHEN 'rejected' THEN 'completed' ELSE 'author' END")
 
         # 3. Document Versions table
         conn.execute("""
@@ -209,11 +219,18 @@ def init_db():
             action TEXT NOT NULL,
             from_status TEXT NOT NULL,
             to_status TEXT NOT NULL,
+            from_stage TEXT,
+            to_stage TEXT,
             comment TEXT,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (document_id) REFERENCES documents(id) ON DELETE CASCADE
         );
         """)
+        approval_columns = {row["name"] for row in conn.execute("PRAGMA table_info(approval_logs)").fetchall()}
+        if "from_stage" not in approval_columns:
+            conn.execute("ALTER TABLE approval_logs ADD COLUMN from_stage TEXT")
+        if "to_stage" not in approval_columns:
+            conn.execute("ALTER TABLE approval_logs ADD COLUMN to_stage TEXT")
 
         # 5. Reusable Clauses table
         conn.execute("""

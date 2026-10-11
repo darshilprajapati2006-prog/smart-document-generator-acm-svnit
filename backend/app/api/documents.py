@@ -22,7 +22,7 @@ from app.services.llm_extractor import is_llm_configured, extract_with_llm
 
 from app.services.document_classifier import DocumentClassifier
 from app.services.document_repository import DocumentRepository
-from app.services.workflow_service import WorkflowService
+from app.services.workflow_service import WorkflowService, WorkflowConflictError
 from app.services.clause_service import ClauseService
 from app.services.template_editor_service import TemplateEditorService
 from app.services.batch_service import BatchService
@@ -363,7 +363,17 @@ def download_document(doc_id: str, file_format: str, current_user: Dict[str, Any
         "docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         "pdf": "application/pdf"
     }
-    media_type = media_types.get(file_format.lower(), "application/octet-stream")
+    media_type = media_types.get(file_format.lower())
+    if not media_type:
+        raise HTTPException(status_code=404, detail="This document format is not available.")
+    try:
+        with target_path.open("rb") as generated_file:
+            signature = generated_file.read(5)
+    except OSError:
+        raise HTTPException(status_code=404, detail=f"The generated {file_format.upper()} file is unavailable.")
+    valid_signature = signature.startswith(b"%PDF-") if file_format.lower() == "pdf" else signature.startswith(b"PK")
+    if not valid_signature:
+        raise HTTPException(status_code=404, detail=f"The generated {file_format.upper()} file is invalid or unavailable.")
     
     return FileResponse(
         path=str(target_path),
@@ -870,34 +880,45 @@ def get_document_version_detail(doc_id: str, version_num: int, current_user: Dic
         raise HTTPException(status_code=404, detail=f"Version {version_num} for document '{doc_id}' not found.")
     return v
 
-@router.get("/{doc_id}/download/pdf")
-def download_approved_document_pdf(doc_id: str, current_user: Dict[str, Any] = Depends(require_authenticated_user)):
-    """Downloads the current approved version's stored PDF after document access checks."""
+@router.get("/{doc_id}/download/{file_format}")
+def download_current_document_file(
+    doc_id: str,
+    file_format: str,
+    current_user: Dict[str, Any] = Depends(require_authenticated_user),
+):
+    """Downloads the current canonical version's PDF or DOCX after access checks."""
     doc = _assert_document_access(doc_id, current_user)
-    if doc.get("status") != "approved":
-        raise HTTPException(status_code=409, detail="PDF download is available after the current document version is approved.")
+    file_format = file_format.lower()
+    if file_format not in {"pdf", "docx"}:
+        raise HTTPException(status_code=404, detail="This document format is not available.")
 
     version = doc.get("latest_version") or {}
-    stored_pdf_path = version.get("pdf_path")
-    if not stored_pdf_path:
-        raise HTTPException(status_code=404, detail="The approved document PDF is unavailable. Generate a new version to create its PDF.")
+    stored_path = version.get("pdf_path" if file_format == "pdf" else "docx_path")
+    unavailable_detail = f"The current document {file_format.upper()} is unavailable. Generate a new version to create it."
+    if not stored_path:
+        raise HTTPException(status_code=404, detail=unavailable_detail)
 
-    pdf_path = Path(stored_pdf_path).resolve()
+    document_path = Path(stored_path).resolve()
     storage_root = file_manager.base_dir.resolve()
-    if not pdf_path.is_relative_to(storage_root) or not pdf_path.is_file():
-        raise HTTPException(status_code=404, detail="The approved document PDF is unavailable. Generate a new version to create its PDF.")
+    if not document_path.is_relative_to(storage_root) or not document_path.is_file():
+        raise HTTPException(status_code=404, detail=unavailable_detail)
     try:
-        with pdf_path.open("rb") as pdf_file:
-            if pdf_file.read(5) != b"%PDF-":
-                raise HTTPException(status_code=404, detail="The stored PDF is invalid or unavailable. Generate a new version to create its PDF.")
+        with document_path.open("rb") as document_file:
+            signature = document_file.read(5)
+            valid = signature.startswith(b"%PDF-") if file_format == "pdf" else signature.startswith(b"PK")
+            if not valid:
+                raise HTTPException(status_code=404, detail=f"The stored {file_format.upper()} is invalid or unavailable.")
     except OSError:
-        raise HTTPException(status_code=404, detail="The approved document PDF is unavailable. Generate a new version to create its PDF.")
+        raise HTTPException(status_code=404, detail=unavailable_detail)
 
     return FileResponse(
-        path=str(pdf_path),
-        filename=pdf_path.name,
-        media_type="application/pdf",
-        headers={"Content-Disposition": f'attachment; filename="{pdf_path.name}"'},
+        path=str(document_path),
+        filename=document_path.name,
+        media_type=(
+            "application/pdf" if file_format == "pdf"
+            else "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        ),
+        headers={"Content-Disposition": f'attachment; filename="{document_path.name}"'},
     )
 
 @router.post("/{doc_id}/versions/{version_num}/restore")
@@ -943,8 +964,8 @@ def transition_workflow_status(
         )
         AnalyticsService.record_event("workflow_transition", None, None, "success", current_user.get("role"))
         return res
-    except (ValueError, PermissionError) as e:
-        status_code = 403 if isinstance(e, PermissionError) else 400
+    except (WorkflowConflictError, ValueError, PermissionError) as e:
+        status_code = 403 if isinstance(e, PermissionError) else 409 if isinstance(e, WorkflowConflictError) else 400
         raise HTTPException(status_code=status_code, detail=str(e))
 
 @router.get("/{doc_id}/workflow/history")
