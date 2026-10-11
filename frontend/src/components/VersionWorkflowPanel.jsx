@@ -177,16 +177,16 @@ export default function VersionWorkflowPanel({ documentId, role }) {
     <section className="page-panel version-page">
       <div className="page-panel-heading version-heading">
         <div>
-          <h2 style={{ fontSize: "1.3rem", fontWeight: "700", color: "#0f172a", margin: 0 }}>
-            🗂️ Document Version History & Approval Workflow (Features 4, 5, 7, 10, 11, 12)
+          <h2 className="panel-title">
+            🗂️ Document Version History & Approval Workflow
           </h2>
-          <p style={{ margin: "4px 0 0 0", color: "#64748b", fontSize: "0.9rem" }}>
+          <p className="panel-subtitle">
             Track persistent version snapshots, manage review lifecycle transitions, apply cryptographic digital signatures, and distribute via email / Drive.
           </p>
         </div>
         <div className="version-heading-actions">
           {role && (
-            <span style={{ fontSize: "0.85rem", padding: "4px 8px", background: "#f1f5f9", borderRadius: "6px", fontWeight: "600", color: "#334155" }}>
+            <span className="version-role-badge">
               👤 Role: {role}
             </span>
           )}
@@ -362,8 +362,8 @@ export default function VersionWorkflowPanel({ documentId, role }) {
 
                 {/* Section C: Cryptographic Digital Signature & Tamper Detection */}
                 <div className="signature-panel">
-                  <h4 style={{ fontSize: "0.95rem", fontWeight: "700", color: "#1e293b", margin: "0 0 10px 0" }}>
-                    🔏 Cryptographic Digital Signature (Feature 12: HMAC-SHA256)
+                  <h4 style={{ fontSize: "0.95rem", fontWeight: "700", color: "var(--text, #1e293b)", margin: "0 0 10px 0" }}>
+                    🔏 Cryptographic Digital Signature (HMAC-SHA256)
                   </h4>
                   <div style={{ display: "flex", gap: "10px" }}>
                     <button type="button" className="primary-btn" onClick={handleSign} style={{ padding: "8px 14px", fontSize: "0.85rem" }}>
@@ -398,7 +398,7 @@ export default function VersionWorkflowPanel({ documentId, role }) {
       {showEmailModal && (
         <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }}>
           <div className="theme-modal-card version-email-modal" style={{ width: "450px", maxWidth: "90%" }}>
-            <h3 style={{ margin: "0 0 12px 0", fontSize: "1.1rem" }}>✉️ Distribute Document via Email (Feature 11)</h3>
+            <h3 style={{ margin: "0 0 12px 0", fontSize: "1.1rem" }}>✉️ Distribute Document via Email</h3>
             <form onSubmit={handleSendEmail} style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
               <div>
                 <label style={{ fontSize: "0.85rem", fontWeight: "600" }}>Recipients (comma separated):</label>

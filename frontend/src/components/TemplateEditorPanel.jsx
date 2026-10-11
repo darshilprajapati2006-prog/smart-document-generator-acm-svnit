@@ -63,10 +63,10 @@ export default function TemplateEditorPanel({ currentRole }) {
     <section className="page-panel template-page">
       <div className="page-panel-heading">
         <div>
-          <h2 style={{ fontSize: "1.3rem", fontWeight: "700", color: "#0f172a", margin: 0 }}>
-            🎨 Template Preview & Configuration Editor (Feature 8)
+          <h2 className="panel-title">
+            🎨 Template Preview & Configuration Editor
           </h2>
-          <p style={{ margin: "4px 0 0 0", color: "#64748b", fontSize: "0.9rem" }}>
+          <p className="panel-subtitle">
             Preview template layout with isolated sample data and configure display titles, section order, and branding.
           </p>
         </div>
@@ -88,17 +88,25 @@ export default function TemplateEditorPanel({ currentRole }) {
 
       {/* Template Selectors */}
       <div className="template-switcher">
-        {(configs.length > 0 ? configs.map((c) => c.document_type) : ["exec_meet", "bill_certificate", "bill_summary"]).map((tId) => (
-          <button
-            key={tId}
-            type="button"
-            className={selectedTemplate === tId ? "primary-btn" : "secondary-btn"}
-            onClick={() => setSelectedTemplate(tId)}
-            style={{ padding: "8px 16px", fontSize: "0.9rem" }}
-          >
-            {tId === "exec_meet" ? "Executive Meet" : tId === "bill_certificate" ? "Bill Certificate" : "Bill Summary"}
-          </button>
-        ))}
+        {[
+          { id: "exec_meet", defaultLabel: "Executive Meet" },
+          { id: "bill_certificate", defaultLabel: "Bill Certificate" },
+          { id: "bill_summary", defaultLabel: "Bill Summary" }
+        ].map(({ id, defaultLabel }) => {
+          const cfg = configs.find(c => (c.template_id || c.document_type || c.id) === id);
+          const label = cfg?.display_name || defaultLabel;
+          return (
+            <button
+              key={id}
+              type="button"
+              className={selectedTemplate === id ? "primary-btn" : "secondary-btn"}
+              onClick={() => setSelectedTemplate(id)}
+              style={{ padding: "8px 16px", fontSize: "0.9rem" }}
+            >
+              {label}
+            </button>
+          );
+        })}
       </div>
 
       {currentRole && !["template_admin", "tmpladmin", "admin"].includes(currentRole) && (
