@@ -413,7 +413,7 @@ export async function getSystemAdminBootstrapStatus() {
 
 export async function registerUser({ role, full_name, email, password, confirm_password, invitation_token }) {
   if (password !== confirm_password) throw new Error("Passwords do not match.");
-  if (role !== "author") throw new Error("Only Author registration is available.");
+  if (!invitation_token && role !== "author") throw new Error("Only Author registration is available.");
   const credential = await createUserWithEmailAndPassword(firebaseAuth, email, password);
   await updateProfile(credential.user, { displayName: full_name });
   const token = await credential.user.getIdToken(true);

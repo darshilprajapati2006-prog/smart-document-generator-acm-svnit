@@ -94,7 +94,8 @@ class UserRegisterRequest(BaseModel):
     @field_validator("requested_role")
     @classmethod
     def validate_public_role(cls, v):
-        if v is not None and v not in {"author", "viewer"}:
+        valid_roles = {"author", "reviewer", "approver", "template_admin", "admin", "viewer"}
+        if v is not None and v not in valid_roles:
             raise ValueError("Please choose an available registration role.")
         return v
 
