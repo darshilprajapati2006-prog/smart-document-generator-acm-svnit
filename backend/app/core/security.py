@@ -113,6 +113,22 @@ def sign_data_payload(data: Dict[str, Any], signer_id: str) -> str:
     to_sign = f"{signer_id}:{p_hash}".encode('utf-8')
     return hmac.new(SECRET_KEY.encode('utf-8'), to_sign, hashlib.sha256).hexdigest()
 
+def is_allowlisted_admin(email: Optional[str]) -> bool:
+    """Returns True if the email belongs to the institutional administrator allowlist."""
+    if not email:
+        return False
+    email_clean = email.strip().lower()
+    bootstrap_email = os.getenv("ADMIN_BOOTSTRAP_EMAIL", "admin@svnit.acm.org").strip().lower()
+    allowlist = {
+        "admin@svnit.acm.org",
+        "i25ai007@aid.svnit.ac.in",
+        "ddprajapati916@gmail.com",
+        bootstrap_email
+    }
+    custom_admins = {e.strip().lower() for e in os.getenv("ADMIN_EMAILS", "").split(",") if e.strip()}
+    allowlist.update(custom_admins)
+    return email_clean in allowlist
+
 def get_current_user(credentials: Optional[HTTPAuthorizationCredentials] = Security(security_bearer)) -> Optional[Dict[str, Any]]:
     """Validates a Firebase ID token and loads the matching active, verified DB user."""
     if not credentials:
@@ -138,11 +154,23 @@ def get_current_user(credentials: Optional[HTTPAuthorizationCredentials] = Secur
                 return None
             if user_row["is_verified"] == 0 or user_row["status"] == "pending_verification":
                 return None
-            user["role"] = user_row["role"]
+            
+            if is_allowlisted_admin(user.get("email")):
+                user["role"] = "admin"
+                user["status"] = "active"
+                user["is_active"] = 1
+                user["is_verified"] = 1
+                try:
+                    conn.execute("UPDATE users SET role = 'admin', status = 'active', is_active = 1, is_verified = 1 WHERE id = ?", (user_row["id"],))
+                except Exception:
+                    pass
+            else:
+                user["role"] = user_row["role"]
+                user["status"] = user_row["status"]
+                user["is_active"] = user_row["is_active"]
+                user["is_verified"] = user_row["is_verified"] if "is_verified" in user_row.keys() else 1
+
             user["full_name"] = user_row["full_name"]
-            user["status"] = user_row["status"]
-            user["is_active"] = user_row["is_active"]
-            user["is_verified"] = user_row["is_verified"] if "is_verified" in user_row.keys() else 1
     except Exception:
         pass
     return user
@@ -176,9 +204,17 @@ def require_authenticated_user(credentials: Optional[HTTPAuthorizationCredential
             )
         if user_row["is_verified"] == 0 or user_row["status"] == "pending_verification":
             raise HTTPException(status_code=403, detail="Please verify your email address before signing in.")
+
+        if is_allowlisted_admin(user.get("email")):
+            if user_row["role"] != "admin" or user_row["status"] != "active":
+                conn.execute("UPDATE users SET role = 'admin', status = 'active', is_active = 1, is_verified = 1 WHERE id = ?", (user_row["id"],))
+            user_role = "admin"
+        else:
+            user_role = user_row["role"]
+
         # Keep authenticated context strictly synchronized with active database record
         user["sub"] = user_row["id"]
-        user["role"] = user_row["role"]
+        user["role"] = user_role
         user["full_name"] = user_row["full_name"]
         user["status"] = user_row["status"]
         user["is_active"] = user_row["is_active"]

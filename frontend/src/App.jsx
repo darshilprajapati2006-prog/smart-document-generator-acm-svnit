@@ -302,11 +302,35 @@ export default function App() {
   // Good-to-Have Features State
   const [lang, setLang] = useState("en"); // "en" | "hi" | "gu"
   const [activeTab, setActiveTab] = useState("create"); // "create" | "batch" | "history" | "templates" | "analytics"
-  const [currentUser, setCurrentUser] = useState(null);
+  const ADMIN_EMAILS = ["admin@svnit.acm.org", "i25ai007@aid.svnit.ac.in", "ddprajapati916@gmail.com"];
+
+  const [currentUser, setCurrentUser] = useState(() => {
+    try {
+      const saved = localStorage.getItem("acm_doc_user");
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (parsed?.email && ADMIN_EMAILS.includes(parsed.email.toLowerCase())) {
+          return { ...parsed, role: "admin" };
+        }
+        return parsed;
+      }
+      return null;
+    } catch {
+      return null;
+    }
+  });
+
   const [currentRole, setCurrentRole] = useState(() => {
     try {
       const saved = localStorage.getItem("acm_doc_user");
-      return saved ? JSON.parse(saved).role : "author";
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (parsed?.email && ADMIN_EMAILS.includes(parsed.email.toLowerCase())) {
+          return "admin";
+        }
+        return parsed.role || "author";
+      }
+      return "author";
     } catch {
       return "author";
     }
@@ -349,9 +373,13 @@ export default function App() {
       try {
         const profile = await fetchCurrentUserProfile();
         if (profile?.authenticated && profile.user) {
-          setCurrentUser(profile.user);
-          setCurrentRole(profile.user.role);
-          localStorage.setItem("acm_doc_user", JSON.stringify(profile.user));
+          const userObj = { ...profile.user };
+          if (userObj.email && ADMIN_EMAILS.includes(userObj.email.toLowerCase())) {
+            userObj.role = "admin";
+          }
+          setCurrentUser(userObj);
+          setCurrentRole(userObj.role);
+          localStorage.setItem("acm_doc_user", JSON.stringify(userObj));
         } else {
           setCurrentUser(null);
           localStorage.removeItem("acm_doc_user");
@@ -374,15 +402,23 @@ export default function App() {
   }, []);
 
   function handleLoginSuccess(user) {
-    setCurrentUser(user);
-    setCurrentRole(user.role);
-    localStorage.setItem("acm_doc_user", JSON.stringify(user));
+    const userObj = { ...user };
+    if (userObj?.email && ADMIN_EMAILS.includes(userObj.email.toLowerCase())) {
+      userObj.role = "admin";
+    }
+    setCurrentUser(userObj);
+    setCurrentRole(userObj.role);
+    localStorage.setItem("acm_doc_user", JSON.stringify(userObj));
   }
 
   function handleBootstrapSuccess(user) {
-    setCurrentUser(user);
-    setCurrentRole(user.role);
-    localStorage.setItem("acm_doc_user", JSON.stringify(user));
+    const userObj = { ...user };
+    if (userObj?.email && ADMIN_EMAILS.includes(userObj.email.toLowerCase())) {
+      userObj.role = "admin";
+    }
+    setCurrentUser(userObj);
+    setCurrentRole(userObj.role);
+    localStorage.setItem("acm_doc_user", JSON.stringify(userObj));
   }
 
   function exitBootstrapMode() {

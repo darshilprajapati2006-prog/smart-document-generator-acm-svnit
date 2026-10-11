@@ -21,7 +21,8 @@ from app.db.database import get_db, get_db_path
 from app.core.security import (
     require_authenticated_user,
     require_role,
-    get_current_user
+    get_current_user,
+    is_allowlisted_admin
 )
 from app.services.audit_service import record_audit_log
 
@@ -339,8 +340,14 @@ def create_firebase_session(authorization: Optional[str] = Header(None)):
             raise HTTPException(status_code=403, detail="This email is linked to another account.")
         if row["status"] == "inactive" or row["is_active"] == 0:
             raise HTTPException(status_code=403, detail="Account is deactivated. Contact an administrator.")
-        conn.execute("UPDATE users SET firebase_uid = ?, is_verified = 1, status = 'active' WHERE id = ?", (claims["uid"], row["id"]))
-        return {"authenticated": True, "user": {"id": row["id"], "email": row["email"], "full_name": row["full_name"], "role": row["role"], "status": "active", "is_active": 1, "is_verified": 1}}
+        if is_allowlisted_admin(email):
+            conn.execute("UPDATE users SET role = 'admin', status = 'active', is_active = 1, is_verified = 1, firebase_uid = ? WHERE id = ?", (claims["uid"], row["id"]))
+            user_role = "admin"
+        else:
+            user_role = row["role"]
+            conn.execute("UPDATE users SET firebase_uid = ?, is_verified = 1, status = 'active' WHERE id = ?", (claims["uid"], row["id"]))
+
+        return {"authenticated": True, "user": {"id": row["id"], "email": row["email"], "full_name": row["full_name"], "role": user_role, "status": "active", "is_active": 1, "is_verified": 1}}
 
 
 # Firebase sign-out occurs client side; this endpoint records an audit event.
