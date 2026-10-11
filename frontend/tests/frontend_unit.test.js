@@ -422,3 +422,22 @@ test("OTP verification input strictly requires 6 numeric digits", () => {
   assert.equal(validateOtp("12a456"), false); // non-numeric
   assert.equal(validateOtp("849201"), true); // valid 6 digits
 });
+
+test("User Management initials helper properly formats single, multi-word, and email fallbacks", () => {
+  function getInitials(name, email) {
+    if (name && name.trim()) {
+      const parts = name.trim().split(/\s+/);
+      if (parts.length >= 2) {
+        return (parts[0][0] + parts[1][0]).toUpperCase();
+      }
+      return parts[0].slice(0, 2).toUpperCase();
+    }
+    return (email || "U").slice(0, 2).toUpperCase();
+  }
+
+  assert.equal(getInitials("Darshil Prajapati", "i25ai007@aid.svnit.ac.in"), "DP");
+  assert.equal(getInitials("Admin", "admin@svnit.ac.in"), "AD");
+  assert.equal(getInitials("", "i25ai007@aid.svnit.ac.in"), "I2");
+  assert.equal(getInitials(null, "president@svnit.acm.org"), "PR");
+});
+
