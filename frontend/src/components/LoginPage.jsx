@@ -48,6 +48,26 @@ export default function LoginPage({ onLoginSuccess }) {
     }).catch((err) => setErrorMessage(err.message));
   }, [invitationToken]);
 
+  useEffect(() => {
+    if (view === "profile_setup") {
+      const autoName =
+        fullName?.trim() ||
+        firebaseAuth.currentUser?.displayName ||
+        activeEmail?.split("@")[0].replace(/[._]/g, " ").replace(/\b\w/g, (c) => c.toUpperCase()) ||
+        "SVNIT Member";
+      setLoading(true);
+      completeVerifiedAccountSetup(autoName)
+        .then((data) => {
+          localStorage.setItem("acm_doc_user", JSON.stringify(data.user));
+          if (onLoginSuccess) onLoginSuccess(data.user);
+        })
+        .catch((err) => {
+          setErrorMessage(err.message || "Could not complete account setup.");
+          setLoading(false);
+        });
+    }
+  }, [view]);
+
   function resetFeedback() {
     setErrorMessage("");
     setSuccessMessage("");
@@ -71,6 +91,7 @@ export default function LoginPage({ onLoginSuccess }) {
     }
 
     setLoading(true);
+    let isAutoCompleting = false;
     try {
       const data = await loginUser(loginEmail.trim(), loginPassword);
       if (data && data.access_token && data.user) {
@@ -81,18 +102,33 @@ export default function LoginPage({ onLoginSuccess }) {
         setErrorMessage("Unexpected authentication response. Please try again.");
       }
     } catch (err) {
-      setErrorMessage(err.message || "Invalid email or password. Please try again.");
       if (err.code === "auth/email-not-verified") {
+        setErrorMessage(err.message || "Verify your email using the link we sent before signing in.");
         setActiveEmail(loginEmail.trim());
         setView("verify_email");
       } else if (err.code === "smartdocs/profile-not-found") {
-        setActiveEmail(loginEmail.trim());
-        setFullName(firebaseAuth.currentUser?.displayName || "");
-        setErrorMessage("");
-        setView("profile_setup");
+        isAutoCompleting = true;
+        const resolvedName =
+          firebaseAuth.currentUser?.displayName ||
+          fullName?.trim() ||
+          loginEmail.trim().split("@")[0].replace(/[._]/g, " ").replace(/\b\w/g, (c) => c.toUpperCase()) ||
+          "SVNIT Member";
+        try {
+          const autoData = await completeVerifiedAccountSetup(resolvedName);
+          localStorage.setItem("acm_doc_user", JSON.stringify(autoData.user));
+          if (onLoginSuccess) onLoginSuccess(autoData.user);
+          return;
+        } catch (autoErr) {
+          setErrorMessage(autoErr.message || "Could not complete account setup. Please try again.");
+          setLoading(false);
+        }
+      } else {
+        setErrorMessage(err.message || "Invalid email or password. Please try again.");
       }
     } finally {
-      setLoading(false);
+      if (!isAutoCompleting) {
+        setLoading(false);
+      }
     }
   }
 

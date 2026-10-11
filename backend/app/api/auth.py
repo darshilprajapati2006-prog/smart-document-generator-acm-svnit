@@ -333,19 +333,50 @@ def create_firebase_session(authorization: Optional[str] = Header(None)):
     with get_db() as conn:
         row = conn.execute("SELECT * FROM users WHERE firebase_uid = ? OR email = ?", (claims["uid"], email)).fetchone()
         if not row:
-            raise HTTPException(status_code=403, detail="No SmartDocs account found. Create an account first.")
+            if not is_approved_institutional_email(email):
+                raise HTTPException(status_code=403, detail="Use an SVNIT institutional email address.")
+            # Automatically provision the user record so verified SVNIT institutional members sign in directly
+            full_name = claims.get("name") or claims.get("displayName")
+            if not full_name:
+                parts = email.split("@")[0].replace(".", " ").replace("_", " ").split()
+                full_name = " ".join(p.capitalize() for p in parts) if parts else "SVNIT Member"
+            
+            # Check if there is an approved role request
+            role_req = conn.execute(
+                "SELECT requested_role, status FROM user_role_requests WHERE email = ? ORDER BY created_at DESC",
+                (email,)
+            ).fetchone()
+            if is_allowlisted_admin(email):
+                user_role = "admin"
+            elif role_req and role_req["status"] == "approved":
+                user_role = role_req["requested_role"]
+            else:
+                user_role = "author"
+            
+            user_id = claims["uid"]
+            conn.execute(
+                "INSERT INTO users (id, email, hashed_password, full_name, role, status, is_active, is_verified, firebase_uid) VALUES (?, ?, 'firebase-managed', ?, ?, 'active', 1, 1, ?)",
+                (user_id, email, full_name, user_role, claims["uid"])
+            )
+            row = conn.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
+
         if row["email"].strip().lower() != email:
             raise HTTPException(status_code=403, detail="Firebase account email does not match the SmartDocs profile.")
         if row["firebase_uid"] and row["firebase_uid"] != claims["uid"]:
-            raise HTTPException(status_code=403, detail="This email is linked to another account.")
+            conn.execute("UPDATE users SET firebase_uid = ? WHERE id = ?", (claims["uid"], row["id"]))
         if row["status"] == "inactive" or row["is_active"] == 0:
             raise HTTPException(status_code=403, detail="Account is deactivated. Contact an administrator.")
         if is_allowlisted_admin(email):
             conn.execute("UPDATE users SET role = 'admin', status = 'active', is_active = 1, is_verified = 1, firebase_uid = ? WHERE id = ?", (claims["uid"], row["id"]))
             user_role = "admin"
         else:
-            user_role = row["role"]
-            conn.execute("UPDATE users SET firebase_uid = ?, is_verified = 1, status = 'active' WHERE id = ?", (claims["uid"], row["id"]))
+            role_req = conn.execute("SELECT requested_role FROM user_role_requests WHERE (user_id = ? OR email = ?) AND status = 'approved' ORDER BY reviewed_at DESC", (row["id"], email)).fetchone()
+            if role_req:
+                user_role = role_req["requested_role"]
+                conn.execute("UPDATE users SET role = ?, firebase_uid = ?, is_verified = 1, status = 'active' WHERE id = ?", (user_role, claims["uid"], row["id"]))
+            else:
+                user_role = row["role"]
+                conn.execute("UPDATE users SET firebase_uid = ?, is_verified = 1, status = 'active' WHERE id = ?", (claims["uid"], row["id"]))
 
         return {"authenticated": True, "user": {"id": row["id"], "email": row["email"], "full_name": row["full_name"], "role": user_role, "status": "active", "is_active": 1, "is_verified": 1}}
 

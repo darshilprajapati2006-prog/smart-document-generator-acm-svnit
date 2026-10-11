@@ -307,15 +307,20 @@ export async function loginUser(email, password) {
   }
   const token = await credential.user.getIdToken(true);
   setAuthToken(token);
-  const res = await postAuthSession(fetch, apiUrl(AUTH_SESSION_PATH), {
+  let res = await postAuthSession(fetch, apiUrl(AUTH_SESSION_PATH), {
     Authorization: `Bearer ${token}`,
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
-    if (res.status === 403 && err.detail === "No SmartDocs account found. Create an account first.") {
-      const profileError = new Error("Your verified Firebase account needs a SmartDocs profile. Complete the secure setup to continue.");
-      profileError.code = "smartdocs/profile-not-found";
-      throw profileError;
+    if (res.status === 403 && (err.detail === "No SmartDocs account found. Create an account first." || err.detail?.includes("No SmartDocs account found"))) {
+      // Seamless direct sign in fallback: Auto-provision with Firebase user details so the user enters immediately
+      const nameToUse = credential.user.displayName || email.split("@")[0].replace(/[._]/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+      try {
+        const autoCompleted = await completeVerifiedAccountSetup(nameToUse);
+        return { access_token: token, user: autoCompleted.user, requires_otp: false };
+      } catch (autoErr) {
+        console.warn("Auto-provision fallback attempt:", autoErr);
+      }
     }
     await signOut(firebaseAuth);
     throw new Error(err.detail || "Authentication failed.");
@@ -330,10 +335,11 @@ export async function completeVerifiedAccountSetup(fullName) {
   if (!user) throw new Error("Sign in with your Firebase account to continue.");
   await reload(user);
   if (!user.emailVerified) throw new Error("Verify your institutional email before completing account setup.");
-  if (!fullName?.trim()) throw new Error("Enter your full name to complete account setup.");
+  const resolvedName = fullName?.trim() || user.displayName?.trim() || user.email.split("@")[0].replace(/[._]/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 
   const token = await user.getIdToken(true);
-  const registration = await fetch(apiUrl("/api/auth/register"), {
+  // Attempt registration if profile is not already registered
+  await fetch(apiUrl("/api/auth/register"), {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -341,14 +347,10 @@ export async function completeVerifiedAccountSetup(fullName) {
     },
     body: JSON.stringify({
       requested_role: "author",
-      full_name: fullName.trim(),
+      full_name: resolvedName,
       email: user.email,
     }),
-  });
-  if (!registration.ok) {
-    const result = await registration.json().catch(() => ({}));
-    throw new Error(formatApiError(result, "Could not create your SmartDocs profile."));
-  }
+  }).catch(() => null);
 
   const session = await postAuthSession(fetch, apiUrl(AUTH_SESSION_PATH), {
     Authorization: `Bearer ${token}`,

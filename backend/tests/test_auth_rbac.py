@@ -119,6 +119,26 @@ def test_verified_firebase_account_can_finish_missing_smartdocs_profile():
     assert row["is_verified"] == 1
 
 
+def test_verified_institutional_session_auto_provisions_without_prior_registration():
+    email = f"autologin_{uuid.uuid4().hex[:8]}@chem.svnit.ac.in"
+    uid = f"uid-{uuid.uuid4().hex}"
+    headers = firebase_headers(email, uid, verified=True)
+
+    # User directly signs in via /api/auth/session without any prior DB registration
+    session = client.post("/api/auth/session", headers=headers)
+    assert session.status_code == 200
+    assert session.json()["authenticated"] is True
+    assert session.json()["user"]["email"] == email
+    assert session.json()["user"]["role"] == "author"
+    assert session.json()["user"]["is_verified"] == 1
+    assert session.json()["user"]["status"] == "active"
+
+    # Now verify that authenticated endpoints work immediately with their session token
+    me = client.get("/api/auth/me", headers=headers)
+    assert me.status_code == 200
+    assert me.json()["user"]["email"] == email
+
+
 def test_public_registration_is_author_only_and_rejects_role_escalation():
     email = f"viewer_{uuid.uuid4().hex[:6]}@aid.svnit.ac.in"
     uid = f"uid-{uuid.uuid4().hex}"
