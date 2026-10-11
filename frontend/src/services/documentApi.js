@@ -410,10 +410,12 @@ export async function getSystemAdminBootstrapStatus() {
   if (!response.ok) throw new Error(status.detail || "Bootstrap readiness could not be verified.");
   return status;
 }
-
 export async function registerUser({ role, full_name, email, password, confirm_password, invitation_token }) {
   if (password !== confirm_password) throw new Error("Passwords do not match.");
-  if (!invitation_token && role !== "author") throw new Error("Only Author registration is available.");
+  const allowedRoles = ["viewer", "author", "reviewer", "approver", "template_admin", "admin"];
+  if (!invitation_token && !allowedRoles.includes(role)) {
+    throw new Error("Please select a valid institutional role.");
+  }
   const credential = await createUserWithEmailAndPassword(firebaseAuth, email, password);
   await updateProfile(credential.user, { displayName: full_name });
   const token = await credential.user.getIdToken(true);

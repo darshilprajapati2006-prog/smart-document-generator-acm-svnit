@@ -573,10 +573,12 @@ export default function LoginPage({ onLoginSuccess }) {
                   invitation
                     ? `Admin Invitation: ${invitation.role.replace("_", " ")} · ${invitation.email}`
                     : "Validating administrator invitation…"
-                ) : registerRole === "author" || registerRole === "viewer" ? (
-                  "✓ Instant access with institutional SVNIT email verification."
+                ) : registerRole === "viewer" ? (
+                  "✓ Instant access with institutional SVNIT email verification (Read-only access)."
+                ) : registerRole === "author" ? (
+                  "✓ Instant access with institutional SVNIT email verification (Create & generate documents)."
                 ) : registerRole === "admin" ? (
-                  "🛡️ System Admin (Pre-authorized admin accounts active immediately; other accounts route access requests for verification)."
+                  "🛡️ System Admin (Pre-authorized admin accounts active immediately; other accounts route access requests to System Admin for approval)."
                 ) : (
                   "⏳ Sign up with your college ID; an access request for this role will be routed to the System Admin for approval in User Management."
                 )}
