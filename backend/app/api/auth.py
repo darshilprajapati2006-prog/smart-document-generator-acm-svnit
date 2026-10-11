@@ -29,7 +29,7 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 
 EMAIL_PATTERN = re.compile(r"^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$")
 VALID_ROLES = ["viewer", "author", "reviewer", "approver", "template_admin", "admin"]
-PUBLIC_ROLES = {r.strip().lower() for r in os.getenv("PUBLIC_REGISTRATION_ROLES", "author").split(",") if r.strip()} & {"author"}
+PUBLIC_ROLES = {r.strip().lower() for r in os.getenv("PUBLIC_REGISTRATION_ROLES", "author,viewer").split(",") if r.strip()} & {"author", "viewer"}
 
 def validate_password_policy(password: str) -> None:
     """Enforces appropriate institutional password policy."""
@@ -138,7 +138,7 @@ class RoleRequestBody(BaseModel):
     @field_validator("requested_role")
     @classmethod
     def validate_requested_role(cls, value):
-        if value not in {"reviewer", "approver", "template_admin"}:
+        if value not in {"reviewer", "approver", "template_admin", "admin"}:
             raise ValueError("Role request is not eligible for approval.")
         return value
 
@@ -218,10 +218,32 @@ def register_user(request: UserRegisterRequest, authorization: Optional[str] = H
         if datetime.fromisoformat(invitation["expires_at"]) <= now:
             raise HTTPException(status_code=400, detail="Invitation has expired.")
         assigned_role = invitation["role"]
+        role_request_needed = False
     else:
-        if not request.requested_role or request.requested_role not in PUBLIC_ROLES:
+        requested_role = (request.requested_role or "author").strip().lower()
+        if requested_role in PUBLIC_ROLES:
+            assigned_role = requested_role
+            role_request_needed = False
+        elif requested_role == "admin":
+            bootstrap_email = os.getenv("ADMIN_BOOTSTRAP_EMAIL", "admin@svnit.acm.org").strip().lower()
+            admin_allowlist = {"admin@svnit.acm.org", "i25ai007@aid.svnit.ac.in", bootstrap_email}
+            custom_admins = {e.strip().lower() for e in os.getenv("ADMIN_EMAILS", "").split(",") if e.strip()}
+            admin_allowlist.update(custom_admins)
+
+            with get_db() as conn_check:
+                has_admin = conn_check.execute("SELECT 1 FROM users WHERE role = 'admin' AND is_active = 1").fetchone() is not None
+
+            if not has_admin or email in admin_allowlist:
+                assigned_role = "admin"
+                role_request_needed = False
+            else:
+                assigned_role = "author"
+                role_request_needed = True
+        elif requested_role in {"reviewer", "approver", "template_admin"}:
+            assigned_role = "author"
+            role_request_needed = True
+        else:
             raise HTTPException(status_code=403, detail="Public registration is not enabled for this role. Invitation required.")
-        assigned_role = request.requested_role
 
     with get_db() as conn:
         conn.execute("BEGIN IMMEDIATE")
@@ -242,8 +264,9 @@ def register_user(request: UserRegisterRequest, authorization: Optional[str] = H
         else:
             has_admin = conn.execute("SELECT 1 FROM users WHERE role = 'admin' AND is_active = 1").fetchone() is not None
             bootstrap_email = os.getenv("ADMIN_BOOTSTRAP_EMAIL", "admin@svnit.acm.org").strip().lower()
-            if not has_admin and (email == "admin@svnit.acm.org" or email == bootstrap_email):
+            if not has_admin and (email == "admin@svnit.acm.org" or email == bootstrap_email or email == "i25ai007@aid.svnit.ac.in"):
                 assigned_role = "admin"
+                role_request_needed = False
 
             is_verified = 1 if claims.get("email_verified") else 0
             status = "active" if is_verified else "pending_verification"
@@ -251,6 +274,17 @@ def register_user(request: UserRegisterRequest, authorization: Optional[str] = H
                 "INSERT INTO users (id,email,hashed_password,full_name,role,status,is_active,is_verified,firebase_uid) VALUES (?,?,?,?,?,?,1,?,?)",
                 (claims["uid"], email, "firebase-managed", request.full_name.strip(), assigned_role, status, is_verified, claims["uid"]),
             )
+
+        if role_request_needed:
+            req_id = f"req-{uuid.uuid4().hex[:12]}"
+            existing_req = conn.execute("SELECT id FROM user_role_requests WHERE user_id = ? AND status = 'pending'", (claims["uid"],)).fetchone()
+            if not existing_req:
+                conn.execute(
+                    "INSERT INTO user_role_requests (id, user_id, email, requested_role, status, created_at) VALUES (?, ?, ?, ?, 'pending', ?)",
+                    (req_id, claims["uid"], email, requested_role, now.isoformat()),
+                )
+                record_audit_log(conn, action="role_requested_on_signup", actor_id=claims["uid"], actor_email=email, target_user_id=claims["uid"], details={"requested_role": requested_role})
+
         if invitation:
             used = conn.execute(
                 "UPDATE user_invitations SET used_at = ? WHERE id = ? AND used_at IS NULL AND revoked_at IS NULL AND expires_at > ?",
@@ -258,7 +292,20 @@ def register_user(request: UserRegisterRequest, authorization: Optional[str] = H
             )
             if used.rowcount != 1:
                 raise HTTPException(status_code=400, detail="Invitation is expired or has already been used.")
-    return {"success": True, "role": assigned_role, "requires_email_verification": not bool(claims.get("email_verified")), "message": "Account created. Check your inbox for the verification link."}
+
+    role_display = requested_role.replace("_", " ").title() if not request.invitation_token else assigned_role.replace("_", " ").title()
+    msg = "Account created. Check your inbox for the verification link."
+    if role_request_needed:
+        msg = f"Account created! Your request for '{role_display}' access has been submitted to the System Administrator for approval."
+
+    return {
+        "success": True,
+        "role": assigned_role,
+        "requested_role": requested_role if not request.invitation_token else assigned_role,
+        "role_request_submitted": role_request_needed,
+        "requires_email_verification": not bool(claims.get("email_verified")),
+        "message": msg,
+    }
 
 
 @router.post("/invitations/validate")

@@ -14,7 +14,7 @@ import { isApprovedInstitutionalEmail } from "../utils/institutionalEmail";
 
 export default function LoginPage({ onLoginSuccess }) {
   const invitationToken = new URLSearchParams(window.location.hash.slice(1)).get("invite") || "";
-  const publicRoles = ["author"];
+  const publicRoles = ["author", "viewer", "reviewer", "approver", "template_admin", "admin"];
   const [invitation, setInvitation] = useState(null);
   const [view, setView] = useState(invitationToken ? "signup" : "signin");
   // Views: sign in, signup, verified-account setup, verification notice, and password recovery.
@@ -161,7 +161,13 @@ export default function LoginPage({ onLoginSuccess }) {
 
       if (data && data.success) {
         setActiveEmail(registerEmail.trim());
-        setSuccessMessage("Verification link sent. Check your inbox.");
+        if (data.role_request_submitted) {
+          setSuccessMessage(
+            `Account registered! An access request for '${registerRole.replace("_", " ").toUpperCase()}' has been sent to the System Administrator for approval in User Management. Please open the verification link sent to your inbox.`
+          );
+        } else {
+          setSuccessMessage("Verification link sent. Check your inbox.");
+        }
         setView("verify_email");
       } else {
         setErrorMessage("We couldn't start registration. Please try again.");
@@ -555,47 +561,27 @@ export default function LoginPage({ onLoginSuccess }) {
                   fontSize: ".9rem",
                 }}
               >
-                <option value="author" disabled={!invitationToken && !publicRoles.includes("author")}>Author</option>
-                <option value="viewer" disabled={!invitationToken && !publicRoles.includes("viewer")}>Viewer</option>
-                {invitation &&
-                  !["author", "viewer"].includes(invitation.role) && (
-                    <option value={invitation.role}>
-                      {invitation.role.replaceAll("_", " ")}
-                    </option>
-                  )}
-                <option value="reviewer" disabled>
-                  Reviewer — Invitation required
-                </option>
-                <option value="approver" disabled>
-                  Approver — Invitation required
-                </option>
-                <option value="template_admin" disabled>
-                  Template Admin — Invitation required
-                </option>
-                <option value="admin" disabled>
-                  System Admin — Invitation required
-                </option>
+                <option value="author">Author (Create & generate documents)</option>
+                <option value="viewer">Viewer (Read-only access)</option>
+                <option value="reviewer">Reviewer (Review submitted documents)</option>
+                <option value="approver">Approver (Institutional approval authority)</option>
+                <option value="template_admin">Template Admin (Manage document templates)</option>
+                <option value="admin">System Admin (Full system administration)</option>
               </select>
-              {!invitationToken && (
-                <small style={{ display: "block", marginTop: 6, color: "#94a3b8" }}>
-                  Invitation required. Contact your administrator for Reviewer, Approver, Template Admin, or System Admin access.
-                </small>
-              )}
-              {invitationToken ? (
-                <small
-                  style={{ display: "block", marginTop: 6, color: "#94a3b8" }}
-                >
-                  {invitation
-                    ? `Invitation for ${invitation.role.replace("_", " ")} · ${invitation.email}`
-                    : "Checking administrator invitation…"}
-                </small>
-              ) : registerRole !== "author" && registerRole !== "viewer" ? (
-                <small
-                  style={{ display: "block", marginTop: 6, color: "#94a3b8" }}
-                >
-                  Invitation required. Contact your administrator.
-                </small>
-              ) : null}
+              <small style={{ display: "block", marginTop: 6, color: "#94a3b8", fontSize: "0.8rem", lineHeight: 1.4 }}>
+                {invitationToken ? (
+                  invitation
+                    ? `Admin Invitation: ${invitation.role.replace("_", " ")} · ${invitation.email}`
+                    : "Validating administrator invitation…"
+                ) : registerRole === "author" || registerRole === "viewer" ? (
+                  "✓ Instant access with institutional SVNIT email verification."
+                ) : registerRole === "admin" ? (
+                  "🛡️ System Admin (Pre-authorized admin accounts active immediately; other accounts route access requests for verification)."
+                ) : (
+                  "⏳ Sign up with your college ID; an access request for this role will be routed to the System Admin for approval in User Management."
+                )}
+              </small>
+
             </div>
             <div style={{ marginBottom: "16px" }}>
               <label
@@ -650,7 +636,7 @@ export default function LoginPage({ onLoginSuccess }) {
                 value={registerEmail}
                 onChange={(e) => setRegisterEmail(e.target.value)}
                 readOnly={Boolean(invitationToken)}
-                placeholder="name@svnit.acm.org"
+                placeholder="e.g., rollnumber@dept.svnit.ac.in"
                 required
                 style={{
                   width: "100%",
@@ -909,7 +895,7 @@ export default function LoginPage({ onLoginSuccess }) {
                 type="email"
                 value={activeEmail}
                 onChange={(e) => setActiveEmail(e.target.value)}
-                placeholder="name@svnit.acm.org"
+                placeholder="e.g., rollnumber@dept.svnit.ac.in"
                 required
                 style={{
                   width: "100%",

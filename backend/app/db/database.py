@@ -85,7 +85,7 @@ def init_db():
             id TEXT PRIMARY KEY,
             user_id TEXT NOT NULL,
             email TEXT NOT NULL,
-            requested_role TEXT NOT NULL CHECK(requested_role IN ('reviewer', 'approver', 'template_admin')),
+            requested_role TEXT NOT NULL CHECK(requested_role IN ('reviewer', 'approver', 'template_admin', 'admin')),
             status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending', 'approved', 'rejected')),
             reviewed_by TEXT,
             reviewed_at TEXT,

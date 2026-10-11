@@ -125,7 +125,19 @@ def test_public_registration_is_author_only_and_rejects_role_escalation():
     response = client.post("/api/auth/register", headers=firebase_headers(email, uid), json={
         "requested_role": "viewer", "full_name": "SVNIT Viewer", "email": email,
     })
-    assert response.status_code == 403
+    assert response.status_code == 200
+    assert response.json()["role"] == "viewer"
+
+    # Privileged role requested without invitation creates a role request
+    reviewer_email = f"reviewer_{uuid.uuid4().hex[:6]}@aid.svnit.ac.in"
+    rev_res = client.post("/api/auth/register", headers=firebase_headers(reviewer_email, f"uid-{uuid.uuid4().hex}"), json={
+        "requested_role": "reviewer", "full_name": "SVNIT Reviewer", "email": reviewer_email,
+    })
+    assert rev_res.status_code == 200
+    assert rev_res.json()["role"] == "author"
+    assert rev_res.json()["role_request_submitted"] is True
+
+    # Bad payload rejecting unknown extra fields
     assert client.post("/api/auth/register", headers=firebase_headers("elevate@aid.svnit.ac.in", "x"), json={
         "role": "admin", "full_name": "Self Admin", "email": "elevate@aid.svnit.ac.in",
     }).status_code == 422
