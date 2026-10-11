@@ -1934,6 +1934,18 @@ button:disabled,.primary-btn:disabled,.secondary-btn:disabled { opacity:.5; curs
   .auth-loading-glow { width:230px; height:230px; filter:blur(72px); }
 }
 
+/* Keep the document-form Insert Clause action dark even alongside broad button themes. */
+.app-shell .form-card .form-header-right > .clause-insert-btn {
+  border:1px solid var(--line)!important;
+  color:var(--text-secondary)!important;
+  background:var(--surface-soft)!important;
+}
+.app-shell .form-card .form-header-right > .clause-insert-btn:hover {
+  border-color:rgba(179,155,255,.48)!important;
+  color:var(--text)!important;
+  background:rgba(179,155,255,.1)!important;
+}
+
 /* ==========================================================================
    USER & ROLE MANAGEMENT (SYSTEM ADMIN) MODAL DESIGN SYSTEM
    ========================================================================== */
