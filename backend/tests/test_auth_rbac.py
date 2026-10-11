@@ -302,6 +302,47 @@ def test_authorized_admin_can_approve_role_request_with_audit_log():
     assert any(row["action"] == "role_request_reviewed" and row["target_user_id"] == uid for row in audit)
 
 
+def test_author_role_request_stays_pending_until_admin_approval():
+    email = f"author_request_{uuid.uuid4().hex[:8]}@aid.svnit.ac.in"
+    uid = f"uid-{uuid.uuid4().hex}"
+    headers = firebase_headers(email, uid, verified=True)
+
+    registration = client.post("/api/auth/register", headers=headers, json={
+        "requested_role": "viewer", "full_name": "Author Requester", "email": email,
+    })
+    assert registration.status_code == 200, registration.text
+    assert client.post("/api/auth/session", headers=headers).status_code == 200
+
+    request = client.post("/api/auth/role-requests", headers=headers, json={"requested_role": "author"})
+    assert request.status_code == 200, request.text
+    request_id = request.json()["request_id"]
+
+    from app.db.database import get_db
+    with get_db() as conn:
+        profile = conn.execute("SELECT role FROM users WHERE id=?", (uid,)).fetchone()
+        role_request = conn.execute("SELECT requested_role,status FROM user_role_requests WHERE id=?", (request_id,)).fetchone()
+    assert profile["role"] == "viewer"
+    assert tuple(role_request) == ("author", "pending")
+    assert client.get("/api/auth/me", headers=headers).json()["user"]["role"] == "viewer"
+
+    # Users cannot self-approve requests or directly assign a role to their account.
+    assert client.post(f"/api/auth/role-requests/{request_id}/review", headers=headers, json={
+        "decision": "approve", "confirm_privileged_change": True,
+    }).status_code == 403
+    assert client.put(f"/api/auth/users/{uid}/role", headers=headers, json={
+        "role": "author", "confirm_privileged_change": True,
+    }).status_code == 403
+    assert client.post("/api/auth/role-requests", headers=headers, json={"requested_role": "admin"}).status_code == 422
+
+    admin = helper_login("admin@svnit.acm.org", "Admin@1234")
+    admin_headers = {"Authorization": f"Bearer {admin['access_token']}"}
+    approval = client.post(f"/api/auth/role-requests/{request_id}/review", headers=admin_headers, json={
+        "decision": "approve", "confirm_privileged_change": True,
+    })
+    assert approval.status_code == 200, approval.text
+    assert client.get("/api/auth/me", headers=headers).json()["user"]["role"] == "author"
+
+
 def test_bootstrap_requires_verified_allowlisted_author_and_is_one_time(monkeypatch, tmp_path):
     from app.db.database import get_db
     from secrets import token_urlsafe

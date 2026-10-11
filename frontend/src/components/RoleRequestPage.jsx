@@ -2,7 +2,7 @@ import { useState } from "react";
 import { createRoleRequest } from "../services/documentApi";
 
 export default function RoleRequestPage({ onClose }) {
-  const [role, setRole] = useState("reviewer");
+  const [role, setRole] = useState("author");
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
 
@@ -42,6 +42,7 @@ export default function RoleRequestPage({ onClose }) {
         <form onSubmit={submit} className="role-request-form">
           <label htmlFor="role-request">Requested role</label>
           <select id="role-request" value={role} onChange={(event) => setRole(event.target.value)} disabled={busy}>
+            <option value="author">Author</option>
             <option value="reviewer">Reviewer</option>
             <option value="approver">Approver</option>
             <option value="template_admin">Template Admin</option>
