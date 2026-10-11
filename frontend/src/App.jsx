@@ -1175,11 +1175,12 @@ export default function App() {
         {currentRole === "admin" && (
           <button
             type="button"
-            className="nav-item nav-item-btn"
-            style={{ color: "#dc2626", fontWeight: 600 }}
+            className="nav-item nav-item-btn admin-nav-item"
             onClick={() => { setShowUserMgmt(true); setMobileNavOpen(false); }}
           >
-            <span>👥</span> User Management
+            <span className="nav-icon" aria-hidden="true">👥</span>
+            User Management
+            <span className="admin-nav-pill">Admin</span>
           </button>
         )}
 
@@ -1351,14 +1352,19 @@ export default function App() {
                         {selectedType === doc.id ? "✓" : "+"}
                       </span>
                     </div>
-                    <h3>{doc.title}</h3>
-                    <p>{doc.description}</p>
-                    <div className="demo-preview-chip">
-                      <strong>Demo Reference:</strong> {doc.mockExample.summary}
+                    <div className="document-card-body">
+                      <h3>{doc.title}</h3>
+                      <p>{doc.description}</p>
                     </div>
-                    <span className="card-link" style={{ marginTop: 10 }}>
-                      Use this template →
-                    </span>
+                    <div className="demo-preview-chip">
+                      <span className="demo-chip-badge">Demo Reference</span>
+                      <span className="demo-chip-text">{doc.mockExample.summary}</span>
+                    </div>
+                    <div className="document-card-action">
+                      <span className="card-link">
+                        {selectedType === doc.id ? "Active Document ✓" : "Use this template →"}
+                      </span>
+                    </div>
                   </button>
                 ))}
               </div>

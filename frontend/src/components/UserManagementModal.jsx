@@ -1,14 +1,34 @@
 import React, { useState, useEffect } from "react";
-import { fetchUsers, createInvitation, updateUserRole, updateUserStatus, deleteUser, revokeInvitation, fetchRoleRequests, reviewRoleRequest } from "../services/documentApi";
+import {
+  fetchUsers,
+  createInvitation,
+  updateUserRole,
+  updateUserStatus,
+  deleteUser,
+  revokeInvitation,
+  fetchRoleRequests,
+  reviewRoleRequest,
+} from "../services/documentApi";
 
 const ROLES = [
-  { value: "author", label: "Author", color: "#0284c7" },
-  { value: "reviewer", label: "Reviewer", color: "#d97706" },
-  { value: "approver", label: "Approver", color: "#16a34a" },
-  { value: "template_admin", label: "Template Admin", color: "#7c3aed" },
-  { value: "admin", label: "System Admin", color: "#dc2626" },
-  { value: "viewer", label: "Viewer", color: "#64748b" },
+  { value: "author", label: "Author", color: "#b39bff" },
+  { value: "reviewer", label: "Reviewer", color: "#e5bb69" },
+  { value: "approver", label: "Approver", color: "#5fc993" },
+  { value: "template_admin", label: "Template Admin", color: "#d4c6ff" },
+  { value: "admin", label: "System Admin", color: "#ed7c88" },
+  { value: "viewer", label: "Viewer", color: "#a29daf" },
 ];
+
+function getInitials(name, email) {
+  if (name && name.trim()) {
+    const parts = name.trim().split(/\s+/);
+    if (parts.length >= 2) {
+      return (parts[0][0] + parts[1][0]).toUpperCase();
+    }
+    return parts[0].slice(0, 2).toUpperCase();
+  }
+  return (email || "U").slice(0, 2).toUpperCase();
+}
 
 export default function UserManagementModal({ isOpen, onClose, currentUserId }) {
   const [users, setUsers] = useState([]);
@@ -23,10 +43,25 @@ export default function UserManagementModal({ isOpen, onClose, currentUserId }) 
   const [newRole, setNewRole] = useState("author");
   const [invitationUrl, setInvitationUrl] = useState("");
   const [creating, setCreating] = useState(false);
+  const [copied, setCopied] = useState(false);
 
   useEffect(() => {
-    if (isOpen) loadUsers();
+    if (isOpen) {
+      loadUsers();
+    }
   }, [isOpen]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    function handleKeyDown(e) {
+      if (e.key === "Escape") {
+        setInvitationUrl("");
+        onClose();
+      }
+    }
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [isOpen, onClose]);
 
   if (!isOpen) return null;
 
@@ -46,6 +81,17 @@ export default function UserManagementModal({ isOpen, onClose, currentUserId }) 
     }
   }
 
+  async function handleCopyLink() {
+    if (!invitationUrl) return;
+    try {
+      await navigator.clipboard.writeText(invitationUrl);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2200);
+    } catch {
+      // Fallback
+    }
+  }
+
   async function handleCreateUser(e) {
     e.preventDefault();
     setError(null);
@@ -57,7 +103,14 @@ export default function UserManagementModal({ isOpen, onClose, currentUserId }) 
     }
 
     const privilegedInvitation = ["reviewer", "approver", "template_admin", "admin"].includes(newRole);
-    if (privilegedInvitation && !window.confirm(`Issue a one-time ${ROLES.find((r) => r.value === newRole)?.label} invitation to ${newEmail.trim()}?`)) return;
+    if (
+      privilegedInvitation &&
+      !window.confirm(
+        `Issue a one-time ${ROLES.find((r) => r.value === newRole)?.label} invitation to ${newEmail.trim()}?`
+      )
+    ) {
+      return;
+    }
 
     setCreating(true);
     try {
@@ -72,7 +125,7 @@ export default function UserManagementModal({ isOpen, onClose, currentUserId }) 
       setNewRole("author");
       await loadUsers();
     } catch (err) {
-      setError(err.message || "Failed to create user.");
+      setError(err.message || "Failed to create invitation.");
     } finally {
       setCreating(false);
     }
@@ -82,7 +135,12 @@ export default function UserManagementModal({ isOpen, onClose, currentUserId }) 
     setError(null);
     setSuccessMsg(null);
     const privileged = ["reviewer", "approver", "template_admin", "admin"].includes(targetRole);
-    if (privileged && !window.confirm(`Confirm assigning ${ROLES.find((r) => r.value === targetRole)?.label || targetRole}? This grants privileged access.`)) {
+    if (
+      privileged &&
+      !window.confirm(
+        `Confirm assigning ${ROLES.find((r) => r.value === targetRole)?.label || targetRole}? This grants elevated institutional access.`
+      )
+    ) {
       await loadUsers();
       return;
     }
@@ -91,7 +149,35 @@ export default function UserManagementModal({ isOpen, onClose, currentUserId }) 
       setSuccessMsg(`User role updated to '${targetRole}'.`);
       await loadUsers();
     } catch (err) {
-      setError(err.message || "Failed to update role.");
+      setError(err.message || "Failed to update user role.");
+    }
+  }
+
+  async function handleStatusToggle(user) {
+    setError(null);
+    setSuccessMsg(null);
+    const newStatus = user.status === "active" ? "inactive" : "active";
+    try {
+      await updateUserStatus(user.id, newStatus);
+      setSuccessMsg(`Account '${user.full_name}' is now ${newStatus}.`);
+      await loadUsers();
+    } catch (err) {
+      setError(err.message || "Failed to change account status.");
+    }
+  }
+
+  async function handleDelete(userId, name) {
+    if (!window.confirm(`Are you sure you want to permanently delete user account '${name}'? This action cannot be undone.`)) {
+      return;
+    }
+    setError(null);
+    setSuccessMsg(null);
+    try {
+      await deleteUser(userId);
+      setSuccessMsg(`User account '${name}' was deleted.`);
+      await loadUsers();
+    } catch (err) {
+      setError(err.message || "Failed to delete user account.");
     }
   }
 
@@ -109,7 +195,12 @@ export default function UserManagementModal({ isOpen, onClose, currentUserId }) 
 
   async function handleRoleRequestReview(request, decision) {
     const confirmPrivileged = decision === "approve";
-    if (confirmPrivileged && !window.confirm(`Approve ${request.requested_role.replaceAll("_", " ")} access for ${request.email}?`)) return;
+    if (
+      confirmPrivileged &&
+      !window.confirm(`Approve ${request.requested_role.replaceAll("_", " ")} access for ${request.email}?`)
+    ) {
+      return;
+    }
     try {
       await reviewRoleRequest(request.id, decision, confirmPrivileged);
       setSuccessMsg(`Role request ${decision === "approve" ? "approved" : "rejected"}.`);
@@ -119,423 +210,446 @@ export default function UserManagementModal({ isOpen, onClose, currentUserId }) 
     }
   }
 
-  async function handleStatusToggle(user) {
-    setError(null);
-    setSuccessMsg(null);
-    const newStatus = user.status === "active" ? "inactive" : "active";
-    try {
-      await updateUserStatus(user.id, newStatus);
-      setSuccessMsg(`User account '${user.full_name}' is now ${newStatus}.`);
-      await loadUsers();
-    } catch (err) {
-      setError(err.message || "Failed to change account status.");
-    }
-  }
-
-  async function handleDelete(userId, name) {
-    if (!window.confirm(`Are you sure you want to permanently delete user account '${name}'?`)) {
-      return;
-    }
-    setError(null);
-    setSuccessMsg(null);
-    try {
-      await deleteUser(userId);
-      setSuccessMsg(`User account '${name}' was deleted.`);
-      await loadUsers();
-    } catch (err) {
-      setError(err.message || "Failed to delete user.");
-    }
-  }
-
   return (
     <div
       role="dialog"
       aria-modal="true"
       aria-labelledby="user-mgmt-title"
-      style={{
-        position: "fixed",
-        inset: 0,
-        background: "rgba(15, 23, 42, 0.75)",
-        backdropFilter: "blur(4px)",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        zIndex: 1100,
-        padding: "16px",
+      className="user-mgmt-backdrop"
+      onClick={() => {
+        setInvitationUrl("");
+        onClose();
       }}
     >
-      <div
-        className="theme-modal-card user-management-card"
-        style={{
-          background: "#ffffff",
-          borderRadius: "14px",
-          width: "820px",
-          maxWidth: "100%",
-          maxHeight: "90vh",
-          display: "flex",
-          flexDirection: "column",
-          boxShadow: "0 25px 50px -12px rgba(0, 0, 0, 0.25)",
-          border: "1px solid #e2e8f0",
-          overflow: "hidden",
-        }}
-      >
+      <div className="user-mgmt-card" onClick={(e) => e.stopPropagation()}>
         {/* Header */}
-        <div
-          style={{
-            padding: "18px 24px",
-            borderBottom: "1px solid #f1f5f9",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-            background: "#f8fafc",
-          }}
-        >
-          <div>
-            <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-              <span style={{ fontSize: "1.3rem" }}>👥</span>
-              <h3
-                id="user-mgmt-title"
-                style={{ margin: 0, fontSize: "1.2rem", fontWeight: 700, color: "#0f172a" }}
-              >
-                User & Role Management (System Admin)
-              </h3>
-              <span
-                style={{
-                  fontSize: "0.72rem",
-                  fontWeight: 700,
-                  padding: "2px 8px",
-                  borderRadius: "12px",
-                  background: "#fee2e2",
-                  color: "#991b1b",
-                }}
-              >
-                Admin Restricted
-              </span>
+        <header className="user-mgmt-header">
+          <div className="user-mgmt-header-left">
+            <div className="user-mgmt-header-icon" aria-hidden="true">
+              👥
             </div>
-            <p style={{ margin: "4px 0 0 0", fontSize: "0.82rem", color: "#64748b" }}>
-              Manage accounts, assign roles (Author, Reviewer, Approver, Template Admin, System Admin, Viewer), and activate or deactivate access.
-            </p>
+            <div className="user-mgmt-header-text">
+              <div className="user-mgmt-title-row">
+                <h3 id="user-mgmt-title" className="user-mgmt-title">
+                  User & Role Management
+                </h3>
+                <span className="user-mgmt-admin-badge">Admin Restricted</span>
+              </div>
+              <p className="user-mgmt-subtitle">
+                Manage accounts, assign roles (Author, Reviewer, Approver, Template Admin, System Admin, Viewer), and activate or deactivate access.
+              </p>
+            </div>
           </div>
           <button
             type="button"
-            onClick={() => { setInvitationUrl(""); onClose(); }}
-            aria-label="Close user management"
-            style={{
-              background: "transparent",
-              border: "none",
-              fontSize: "1.3rem",
-              color: "#94a3b8",
-              cursor: "pointer",
-              padding: "4px 8px",
+            className="user-mgmt-close-btn"
+            onClick={() => {
+              setInvitationUrl("");
+              onClose();
             }}
+            aria-label="Close user management modal"
           >
-            ✕
+            <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
+              <path d="M1 1L13 13M1 13L13 1" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+            </svg>
           </button>
-        </div>
+        </header>
 
-        {/* Action & Alert Bar */}
-        <div style={{ padding: "12px 24px", background: "#ffffff", borderBottom: "1px solid #f1f5f9" }}>
-          {error && (
-            <div style={{ padding: "8px 12px", background: "#fef2f2", color: "#991b1b", borderRadius: "6px", fontSize: "0.82rem", marginBottom: "8px" }}>
-              ⚠️ {error}
-            </div>
-          )}
-          {successMsg && (
-            <div style={{ padding: "8px 12px", background: "#f0fdf4", color: "#166534", borderRadius: "6px", fontSize: "0.82rem", marginBottom: "8px" }}>
-              ✓ {successMsg}
-            </div>
-          )}
+        {/* Action & Stats Bar */}
+        <div className="user-mgmt-action-bar">
+          <div className="user-mgmt-stats">
+            <span>Total Registered Accounts:</span>
+            <span className="user-mgmt-count-pill">{users.length}</span>
+          </div>
 
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-            <span style={{ fontSize: "0.85rem", color: "#64748b" }}>
-              Total Registered Accounts: <strong>{users.length}</strong>
-            </span>
-            <div style={{ display: "flex", gap: "8px" }}>
-              <button
-                type="button"
-                onClick={loadUsers}
-                style={{
-                  padding: "6px 12px",
-                  borderRadius: "6px",
-                  border: "1px solid #cbd5e1",
-                  background: "#f8fafc",
-                  fontSize: "0.8rem",
-                  color: "#475569",
-                  cursor: "pointer",
-                }}
-              >
-                🔄 Refresh
-              </button>
-              <button
-                type="button"
-                onClick={() => setShowCreateForm(!showCreateForm)}
-                style={{
-                  padding: "6px 14px",
-                  borderRadius: "6px",
-                  border: "none",
-                  background: showCreateForm ? "#64748b" : "#0284c7",
-                  color: "#ffffff",
-                  fontSize: "0.8rem",
-                  fontWeight: 600,
-                  cursor: "pointer",
-                }}
-              >
-                {showCreateForm ? "Cancel Invitation" : "➕ Invite User"}
-              </button>
-            </div>
+          <div className="user-mgmt-action-btns">
+            <button
+              type="button"
+              className="secondary-btn"
+              onClick={loadUsers}
+              disabled={loading}
+              aria-label="Refresh accounts"
+            >
+              🔄 Refresh
+            </button>
+            <button
+              type="button"
+              className={showCreateForm ? "secondary-btn" : "primary-btn"}
+              onClick={() => setShowCreateForm(!showCreateForm)}
+            >
+              {showCreateForm ? "✕ Cancel" : "➕ Invite User"}
+            </button>
           </div>
         </div>
 
+        {/* Feedback alerts */}
+        {(error || successMsg) && (
+          <div className="user-mgmt-alerts">
+            {error && (
+              <div className="feedback-banner feedback-error" role="alert">
+                ⚠️ {error}
+              </div>
+            )}
+            {successMsg && (
+              <div className="feedback-banner feedback-success" role="status">
+                ✓ {successMsg}
+              </div>
+            )}
+          </div>
+        )}
+
         {/* Admin invitation form */}
         {showCreateForm && (
-          <form
-            onSubmit={handleCreateUser}
-            style={{
-              padding: "16px 24px",
-              background: "#f8fafc",
-              borderBottom: "1px solid #e2e8f0",
-              display: "grid",
-              gridTemplateColumns: "minmax(180px, 2fr) minmax(140px, 1fr) auto",
-              gap: "10px",
-              alignItems: "end",
-            }}
-          >
-            <div>
-              <label style={{ display: "block", fontSize: "0.75rem", fontWeight: 600, color: "#475569", marginBottom: "3px" }}>
-                Institutional Email *
-              </label>
-              <input
-                type="email"
-                placeholder="e.g., rollno@dept.svnit.ac.in"
-                value={newEmail}
-                onChange={(e) => setNewEmail(e.target.value)}
-                required
-                style={{ width: "100%", padding: "7px 10px", borderRadius: "6px", border: "1px solid #cbd5e1", fontSize: "0.82rem", boxSizing: "border-box" }}
-              />
-            </div>
-            <div>
-              <label style={{ display: "block", fontSize: "0.75rem", fontWeight: 600, color: "#475569", marginBottom: "3px" }}>
-                Assigned Role *
-              </label>
-              <select
-                value={newRole}
-                onChange={(e) => setNewRole(e.target.value)}
-                style={{ width: "100%", padding: "7px 10px", borderRadius: "6px", border: "1px solid #cbd5e1", fontSize: "0.82rem", boxSizing: "border-box" }}
-              >
-                {ROLES.map((r) => (
-                  <option key={r.value} value={r.value}>
-                    {r.label}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <button
-                type="submit"
-                disabled={creating}
-                style={{
-                  padding: "8px 16px",
-                  borderRadius: "6px",
-                  border: "none",
-                  background: creating ? "#94a3b8" : "#16a34a",
-                  color: "#ffffff",
-                  fontSize: "0.82rem",
-                  fontWeight: 600,
-                  cursor: creating ? "not-allowed" : "pointer",
-                  height: "33px",
-                }}
-              >
-                {creating ? "Creating..." : "Create Invitation"}
-              </button>
+          <form onSubmit={handleCreateUser} className="user-mgmt-invite-card">
+            <div className="user-mgmt-invite-grid">
+              <div className="user-mgmt-input-group">
+                <label htmlFor="invite-email">Institutional Email *</label>
+                <input
+                  id="invite-email"
+                  type="email"
+                  placeholder="e.g., rollno@dept.svnit.ac.in"
+                  value={newEmail}
+                  onChange={(e) => setNewEmail(e.target.value)}
+                  required
+                  className="user-mgmt-input"
+                />
+              </div>
+              <div className="user-mgmt-input-group">
+                <label htmlFor="invite-role">Assigned Role *</label>
+                <select
+                  id="invite-role"
+                  value={newRole}
+                  onChange={(e) => setNewRole(e.target.value)}
+                  className="user-mgmt-input"
+                >
+                  {ROLES.map((r) => (
+                    <option key={r.value} value={r.value}>
+                      {r.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <button
+                  type="submit"
+                  disabled={creating}
+                  className="primary-btn"
+                  style={{ width: "100%", height: 38 }}
+                >
+                  {creating ? "Creating..." : "Send Invitation"}
+                </button>
+              </div>
             </div>
           </form>
         )}
 
+        {/* One-time link banner */}
         {invitationUrl && (
-          <div style={{ padding: "12px 24px", background: "#eff6ff", borderBottom: "1px solid #bfdbfe", overflowWrap: "anywhere" }}>
-            <strong style={{ color: "#1e3a8a", fontSize: ".82rem" }}>One-time invitation link (shown once):</strong>
-            <div style={{ display: "flex", gap: 8, marginTop: 6 }}>
-              <input readOnly value={invitationUrl} aria-label="Invitation link" style={{ flex: 1, minWidth: 0, padding: 7 }} />
-              <button type="button" onClick={() => navigator.clipboard.writeText(invitationUrl)} style={{ padding: "6px 10px" }}>Copy</button>
+          <div className="user-mgmt-url-banner">
+            <strong>One-Time Invitation Link (shown once):</strong>
+            <div className="user-mgmt-url-row">
+              <input
+                readOnly
+                value={invitationUrl}
+                aria-label="One-time invitation link"
+                className="user-mgmt-input"
+                style={{ flex: 1, minWidth: 0 }}
+              />
+              <button
+                type="button"
+                className="secondary-btn"
+                onClick={handleCopyLink}
+                style={{ flexShrink: 0, minWidth: 100 }}
+              >
+                {copied ? "✓ Copied!" : "📋 Copy Link"}
+              </button>
             </div>
           </div>
         )}
 
-        {/* User Table */}
-        <div style={{ flex: 1, overflowY: "auto", padding: "16px 24px" }}>
+        {/* Main Content Area */}
+        <div className="user-mgmt-body">
           {loading ? (
-            <div style={{ padding: "40px", textAlign: "center", color: "#64748b" }}>Loading accounts...</div>
+            <div className="empty-state">Loading registered accounts...</div>
           ) : users.length === 0 ? (
-            <div style={{ padding: "40px", textAlign: "center", color: "#64748b" }}>No users found.</div>
+            <div className="empty-state">No user accounts found.</div>
           ) : (
-            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.84rem" }}>
-              <thead>
-                <tr style={{ background: "#f8fafc", textAlign: "left", color: "#475569", borderBottom: "2px solid #e2e8f0" }}>
-                  <th style={{ padding: "10px 12px" }}>User</th>
-                  <th style={{ padding: "10px 12px" }}>Email</th>
-                  <th style={{ padding: "10px 12px" }}>Assigned Role</th>
-                  <th style={{ padding: "10px 12px" }}>Status</th>
-                  <th style={{ padding: "10px 12px" }}>Email Verified</th>
-                  <th style={{ padding: "10px 12px" }}>Created</th>
-                  <th style={{ padding: "10px 12px", textAlign: "right" }}>Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {users.map((u) => {
-                  const roleConfig = ROLES.find((r) => r.value === u.role) || { label: u.role, color: "#64748b" };
-                  const isCurrent = currentUserId === u.id;
-                  const isActive = u.status === "active";
+            <div className="user-mgmt-table-scroll">
+              <table className="user-mgmt-table">
+                <thead>
+                  <tr>
+                    <th style={{ width: 200 }}>User</th>
+                    <th style={{ minWidth: 220 }}>Institutional Email</th>
+                    <th style={{ width: 165 }}>Assigned Role</th>
+                    <th style={{ width: 115, textAlign: "center" }}>Status</th>
+                    <th style={{ width: 125, textAlign: "center" }}>Email Verified</th>
+                    <th style={{ width: 160 }}>Created</th>
+                    <th style={{ width: 140, textAlign: "right" }}>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {users.map((u) => {
+                    const isCurrent = currentUserId === u.id;
+                    const isActive = u.status === "active";
+                    const initials = getInitials(u.full_name, u.email);
 
-                  return (
-                    <tr key={u.id} style={{ borderBottom: "1px solid #f1f5f9" }}>
-                      <td style={{ padding: "10px 12px", fontWeight: 600, color: "#0f172a" }}>
-                        {u.full_name} {isCurrent && <span style={{ fontSize: "0.7rem", color: "#0284c7" }}>(You)</span>}
-                      </td>
-                      <td style={{ padding: "10px 12px", color: "#475569" }}>{u.email}</td>
-                      <td style={{ padding: "10px 12px" }}>
-                        <select
-                          value={u.role}
-                          onChange={(e) => handleRoleChange(u.id, e.target.value)}
-                          style={{
-                            padding: "4px 8px",
-                            borderRadius: "6px",
-                            border: `1px solid ${roleConfig.color}`,
-                            fontSize: "0.78rem",
-                            fontWeight: 600,
-                            color: roleConfig.color,
-                            background: "#ffffff",
-                          }}
-                        >
-                          {ROLES.map((r) => (
-                            <option key={r.value} value={r.value}>
-                              {r.label}
-                            </option>
-                          ))}
-                        </select>
-                      </td>
-                      <td style={{ padding: "10px 12px" }}>
-                        <span
-                          style={{
-                            padding: "3px 8px",
-                            borderRadius: "12px",
-                            fontSize: "0.72rem",
-                            fontWeight: 700,
-                            background: isActive ? "#dcfce7" : "#fee2e2",
-                            color: isActive ? "#166534" : "#991b1b",
-                          }}
-                        >
-                          {isActive ? "● Active" : "○ Inactive"}
-                        </span>
-                      </td>
-                      <td style={{ padding: "10px 12px" }}>{u.is_verified ? "Verified" : "Pending"}</td>
-                      <td style={{ padding: "10px 12px", whiteSpace: "nowrap" }}>{u.created_at || "—"}</td>
-                      <td style={{ padding: "10px 12px", textAlign: "right" }}>
-                        <div style={{ display: "flex", gap: "6px", justifyContent: "flex-end" }}>
-                          <button
-                            type="button"
-                            onClick={() => handleStatusToggle(u)}
-                            disabled={isCurrent && isActive}
-                            title={isCurrent && isActive ? "Cannot deactivate yourself" : "Toggle status"}
-                            style={{
-                              padding: "4px 10px",
-                              borderRadius: "5px",
-                              border: "1px solid #cbd5e1",
-                              background: isActive ? "#fff1f2" : "#f0fdf4",
-                              color: isActive ? "#e11d48" : "#16a34a",
-                              fontSize: "0.74rem",
-                              fontWeight: 600,
-                              cursor: isCurrent && isActive ? "not-allowed" : "pointer",
-                            }}
+                    return (
+                      <tr key={u.id}>
+                        {/* User Cell */}
+                        <td>
+                          <div className="user-mgmt-user-cell">
+                            <div className="user-mgmt-avatar" aria-hidden="true">
+                              {initials}
+                            </div>
+                            <span className="user-mgmt-user-name">
+                              {u.full_name || "Unnamed User"}
+                              {isCurrent && <span className="user-mgmt-you-badge">(You)</span>}
+                            </span>
+                          </div>
+                        </td>
+
+                        {/* Email Cell */}
+                        <td className="user-mgmt-email-cell">
+                          {u.email}
+                        </td>
+
+                        {/* Role Cell */}
+                        <td>
+                          <select
+                            value={u.role}
+                            onChange={(e) => handleRoleChange(u.id, e.target.value)}
+                            className="user-mgmt-role-select"
+                            aria-label={`Assigned role for ${u.full_name || u.email}`}
                           >
-                            {isActive ? "Deactivate" : "Activate"}
-                          </button>
-                          {!isCurrent && (
+                            {ROLES.map((r) => (
+                              <option key={r.value} value={r.value}>
+                                {r.label}
+                              </option>
+                            ))}
+                          </select>
+                        </td>
+
+                        {/* Status Cell */}
+                        <td style={{ textAlign: "center" }}>
+                          <span className={`user-mgmt-status-badge ${isActive ? "active" : "inactive"}`}>
+                            <span className="status-dot" aria-hidden="true" />
+                            {isActive ? "Active" : "Inactive"}
+                          </span>
+                        </td>
+
+                        {/* Email Verified Cell */}
+                        <td style={{ textAlign: "center" }}>
+                          <span className={`user-mgmt-verified-badge ${u.is_verified ? "verified" : "pending"}`}>
+                            {u.is_verified ? "✓ Verified" : "⏳ Pending"}
+                          </span>
+                        </td>
+
+                        {/* Created Cell */}
+                        <td className="user-mgmt-date-cell">
+                          {u.created_at || "—"}
+                        </td>
+
+                        {/* Actions Cell */}
+                        <td>
+                          <div className="user-mgmt-actions-cell">
                             <button
                               type="button"
-                              onClick={() => handleDelete(u.id, u.full_name)}
-                              title="Delete user account"
-                              style={{
-                                padding: "4px 8px",
-                                borderRadius: "5px",
-                                border: "1px solid #fecaca",
-                                background: "#ffffff",
-                                color: "#ef4444",
-                                fontSize: "0.74rem",
-                                cursor: "pointer",
-                              }}
+                              onClick={() => handleStatusToggle(u)}
+                              disabled={isCurrent && isActive}
+                              title={
+                                isCurrent && isActive
+                                  ? "Cannot deactivate your own active session"
+                                  : isActive
+                                  ? "Deactivate user account"
+                                  : "Activate user account"
+                              }
+                              className={`user-mgmt-toggle-btn ${isActive ? "btn-deactivate" : "btn-activate"}`}
                             >
-                              🗑️
+                              {isActive ? "Deactivate" : "Activate"}
                             </button>
-                          )}
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+                            {!isCurrent && (
+                              <button
+                                type="button"
+                                onClick={() => handleDelete(u.id, u.full_name)}
+                                title={`Permanently delete user account '${u.full_name}'`}
+                                aria-label={`Delete user account ${u.full_name}`}
+                                className="user-mgmt-delete-btn"
+                              >
+                                <svg
+                                  width="14"
+                                  height="14"
+                                  viewBox="0 0 16 16"
+                                  fill="none"
+                                  aria-hidden="true"
+                                >
+                                  <path
+                                    d="M2.5 4H13.5M5.5 4V2.5C5.5 1.95 5.95 1.5 6.5 1.5H9.5C10.05 1.5 10.5 1.95 10.5 2.5V4M12.5 4V13.5C12.5 14.05 12.05 14.5 11.5 14.5H4.5C3.95 14.5 3.5 14.05 3.5 13.5V4H12.5Z"
+                                    stroke="currentColor"
+                                    strokeWidth="1.5"
+                                    strokeLinecap="round"
+                                    strokeLinejoin="round"
+                                  />
+                                  <path
+                                    d="M6.5 7V11.5M9.5 7V11.5"
+                                    stroke="currentColor"
+                                    strokeWidth="1.5"
+                                    strokeLinecap="round"
+                                  />
+                                </svg>
+                              </button>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
           )}
 
+          {/* Pending Invitations Sub-table */}
           {invitations.length > 0 && (
-            <section style={{ marginTop: 24 }}>
-              <h4 style={{ color: "#0f172a" }}>Invitations</h4>
-              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: ".82rem" }}>
-                <thead><tr style={{ textAlign: "left", color: "#475569" }}><th>Email</th><th>Role</th><th>Status</th><th>Expires</th><th /></tr></thead>
-                <tbody>{invitations.map((inv) => {
-                  const inviteStatus = inv.used_at ? "Accepted" : inv.revoked_at ? "Revoked" : new Date(inv.expires_at) <= new Date() ? "Expired" : "Pending";
-                  return <tr key={inv.id} style={{ borderTop: "1px solid #e2e8f0" }}>
-                    <td>{inv.email}</td><td>{ROLES.find((r) => r.value === inv.role)?.label || inv.role}</td><td>{inviteStatus}</td><td>{new Date(inv.expires_at).toLocaleString()}</td>
-                    <td>{inviteStatus === "Pending" && <button type="button" onClick={() => handleRevokeInvitation(inv)}>Revoke</button>}</td>
-                  </tr>;
-                })}</tbody>
-              </table>
-            </section>
+            <div className="user-mgmt-sub-section">
+              <div className="user-mgmt-sub-header">
+                <h4>Pending Invitations ({invitations.length})</h4>
+              </div>
+              <div className="user-mgmt-table-scroll">
+                <table className="user-mgmt-table">
+                  <thead>
+                    <tr>
+                      <th>Email</th>
+                      <th>Role</th>
+                      <th>Status</th>
+                      <th>Expires</th>
+                      <th style={{ textAlign: "right" }}>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {invitations.map((inv) => {
+                      const inviteStatus = inv.used_at
+                        ? "Accepted"
+                        : inv.revoked_at
+                        ? "Revoked"
+                        : new Date(inv.expires_at) <= new Date()
+                        ? "Expired"
+                        : "Pending";
+                      return (
+                        <tr key={inv.id}>
+                          <td className="user-mgmt-email-cell">{inv.email}</td>
+                          <td>
+                            <span className="user-mgmt-you-badge" style={{ color: "var(--text)" }}>
+                              {ROLES.find((r) => r.value === inv.role)?.label || inv.role}
+                            </span>
+                          </td>
+                          <td>
+                            <span className={`user-mgmt-verified-badge ${inviteStatus === "Pending" ? "pending" : "verified"}`}>
+                              {inviteStatus}
+                            </span>
+                          </td>
+                          <td className="user-mgmt-date-cell">
+                            {new Date(inv.expires_at).toLocaleString()}
+                          </td>
+                          <td style={{ textAlign: "right" }}>
+                            {inviteStatus === "Pending" && (
+                              <button
+                                type="button"
+                                className="user-mgmt-toggle-btn btn-deactivate"
+                                onClick={() => handleRevokeInvitation(inv)}
+                              >
+                                Revoke
+                              </button>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
           )}
 
+          {/* Role Requests Sub-table */}
           {roleRequests.length > 0 && (
-            <section style={{ marginTop: 24 }}>
-              <h4 style={{ color: "#0f172a" }}>Role Requests</h4>
-              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: ".82rem" }}>
-                <thead><tr style={{ textAlign: "left", color: "#475569" }}><th>Email</th><th>Requested role</th><th>Status</th><th>Submitted</th><th /></tr></thead>
-                <tbody>{roleRequests.map((request) => <tr key={request.id} style={{ borderTop: "1px solid #e2e8f0" }}>
-                  <td>{request.email}</td><td>{request.requested_role.replaceAll("_", " ")}</td><td>{request.status}</td><td>{new Date(request.created_at).toLocaleString()}</td>
-                  <td>{request.status === "pending" && <span style={{ display: "flex", gap: 6 }}>
-                    <button type="button" onClick={() => handleRoleRequestReview(request, "approve")}>Approve</button>
-                    <button type="button" onClick={() => handleRoleRequestReview(request, "reject")}>Reject</button>
-                  </span>}</td>
-                </tr>)}</tbody>
-              </table>
-            </section>
+            <div className="user-mgmt-sub-section">
+              <div className="user-mgmt-sub-header">
+                <h4>Role Change Requests ({roleRequests.length})</h4>
+              </div>
+              <div className="user-mgmt-table-scroll">
+                <table className="user-mgmt-table">
+                  <thead>
+                    <tr>
+                      <th>Email</th>
+                      <th>Requested Role</th>
+                      <th>Status</th>
+                      <th>Submitted</th>
+                      <th style={{ textAlign: "right" }}>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {roleRequests.map((request) => (
+                      <tr key={request.id}>
+                        <td className="user-mgmt-email-cell">{request.email}</td>
+                        <td>
+                          <span className="user-mgmt-you-badge" style={{ color: "var(--text)" }}>
+                            {request.requested_role.replaceAll("_", " ")}
+                          </span>
+                        </td>
+                        <td>
+                          <span className={`user-mgmt-verified-badge ${request.status === "pending" ? "pending" : "verified"}`}>
+                            {request.status}
+                          </span>
+                        </td>
+                        <td className="user-mgmt-date-cell">
+                          {new Date(request.created_at).toLocaleString()}
+                        </td>
+                        <td style={{ textAlign: "right" }}>
+                          {request.status === "pending" && (
+                            <div className="user-mgmt-actions-cell">
+                              <button
+                                type="button"
+                                className="user-mgmt-toggle-btn btn-activate"
+                                onClick={() => handleRoleRequestReview(request, "approve")}
+                              >
+                                Approve
+                              </button>
+                              <button
+                                type="button"
+                                className="user-mgmt-toggle-btn btn-deactivate"
+                                onClick={() => handleRoleRequestReview(request, "reject")}
+                              >
+                                Reject
+                              </button>
+                            </div>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
           )}
         </div>
 
         {/* Footer */}
-        <div
-          style={{
-            padding: "12px 24px",
-            borderTop: "1px solid #f1f5f9",
-            display: "flex",
-            justifyContent: "flex-end",
-            background: "#f8fafc",
-          }}
-        >
+        <footer className="user-mgmt-footer">
+          <div className="user-mgmt-audit-note">
+            <span>🔒</span>
+            <span>RBAC permissions and account status changes take effect immediately across all sessions.</span>
+          </div>
           <button
             type="button"
-            onClick={onClose}
-            style={{
-              padding: "7px 18px",
-              borderRadius: "6px",
-              border: "1px solid #cbd5e1",
-              background: "#ffffff",
-              color: "#475569",
-              fontSize: "0.84rem",
-              fontWeight: 500,
-              cursor: "pointer",
+            className="secondary-btn"
+            onClick={() => {
+              setInvitationUrl("");
+              onClose();
             }}
           >
             Close
           </button>
-        </div>
+        </footer>
       </div>
     </div>
   );

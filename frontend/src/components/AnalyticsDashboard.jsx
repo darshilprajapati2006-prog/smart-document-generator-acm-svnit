@@ -34,19 +34,19 @@ export default function AnalyticsDashboard() {
     <section className="page-panel analytics-page">
       <div className="page-panel-heading analytics-heading">
         <div>
-          <h2 style={{ fontSize: "1.3rem", fontWeight: "700", color: "#0f172a", margin: 0 }}>
-            📊 Privacy-Conscious Usage Analytics (Feature 13)
+          <h2 className="panel-title">
+            📊 Operational & Usage Analytics
           </h2>
-          <p style={{ margin: "4px 0 0 0", color: "#64748b", fontSize: "0.9rem" }}>
+          <p className="panel-subtitle">
             Real-time operational telemetry tracking performance, generation success rates, and workflow distributions.
           </p>
         </div>
         <div className="analytics-controls">
-          {loading && <span style={{ fontSize: "0.85rem", color: "#64748b" }}>Updating...</span>}
+          {loading && <span style={{ fontSize: "0.85rem", color: "var(--muted, #64748b)" }}>Updating...</span>}
           <select
             value={filterType}
             onChange={(e) => setFilterType(e.target.value)}
-            style={{ padding: "6px 12px", borderRadius: "6px", border: "1px solid #cbd5e1", fontSize: "0.85rem" }}
+            style={{ padding: "6px 12px", fontSize: "0.85rem" }}
           >
             <option value="">All Document Types</option>
             <option value="exec_meet">Executive Meet</option>

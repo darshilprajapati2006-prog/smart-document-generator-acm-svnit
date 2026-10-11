@@ -319,9 +319,9 @@ export default function ClausesModal({
               <span style={{ fontSize: "1.25rem" }}>📑</span>
               <h3
                 id="clauses-modal-title"
-                style={{ margin: 0, fontSize: "1.15rem", fontWeight: 700, color: "#0f172a" }}
+                style={{ margin: 0, fontSize: "1.15rem", fontWeight: 700, color: "var(--text, #0f172a)" }}
               >
-                Standard Reusable Clauses (Feature 6)
+                Standard Reusable Clauses
               </h3>
               <span
                 style={{

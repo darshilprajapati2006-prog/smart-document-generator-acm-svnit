@@ -40,6 +40,19 @@ function getHeaders() {
   return headers;
 }
 
+export function formatApiError(result, fallback = "An error occurred.") {
+  if (!result) return fallback;
+  const detail = result.detail || result.message || result.error;
+  if (typeof detail === "string") return detail;
+  if (Array.isArray(detail)) {
+    return detail.map((d) => (typeof d === "string" ? d : d.msg || JSON.stringify(d))).join("; ");
+  }
+  if (typeof detail === "object" && detail !== null) {
+    return detail.msg || JSON.stringify(detail);
+  }
+  return fallback;
+}
+
 export async function checkBackendHealth() {
   try {
     const res = await fetch(apiUrl("/health"));
@@ -334,7 +347,7 @@ export async function completeVerifiedAccountSetup(fullName) {
   });
   if (!registration.ok) {
     const result = await registration.json().catch(() => ({}));
-    throw new Error(result.detail || "Could not create your SmartDocs profile.");
+    throw new Error(formatApiError(result, "Could not create your SmartDocs profile."));
   }
 
   const session = await postAuthSession(fetch, apiUrl(AUTH_SESSION_PATH), {
@@ -342,7 +355,7 @@ export async function completeVerifiedAccountSetup(fullName) {
   });
   if (!session.ok) {
     const result = await session.json().catch(() => ({}));
-    throw new Error(result.detail || "Profile created, but sign-in could not be completed. Please try again.");
+    throw new Error(formatApiError(result, "Profile created, but sign-in could not be completed. Please try again."));
   }
   setAuthToken(token);
   const data = await session.json();
@@ -397,10 +410,12 @@ export async function getSystemAdminBootstrapStatus() {
   if (!response.ok) throw new Error(status.detail || "Bootstrap readiness could not be verified.");
   return status;
 }
-
 export async function registerUser({ role, full_name, email, password, confirm_password, invitation_token }) {
   if (password !== confirm_password) throw new Error("Passwords do not match.");
-  if (role !== "author") throw new Error("Only Author registration is available.");
+  const allowedRoles = ["viewer", "author", "reviewer", "approver", "template_admin", "admin"];
+  if (!invitation_token && !allowedRoles.includes(role)) {
+    throw new Error("Please select a valid institutional role.");
+  }
   const credential = await createUserWithEmailAndPassword(firebaseAuth, email, password);
   await updateProfile(credential.user, { displayName: full_name });
   const token = await credential.user.getIdToken(true);
@@ -412,7 +427,7 @@ export async function registerUser({ role, full_name, email, password, confirm_p
     const err = await res.json().catch(() => ({}));
     // Keep Firebase accounts intact if profile creation fails; verified users
     // can sign in and retry SmartDocs profile setup safely.
-    throw new Error(err.detail || "Registration failed.");
+    throw new Error(formatApiError(err, "Registration failed."));
   }
   await sendEmailVerification(credential.user, { url: window.location.origin });
   return res.json();

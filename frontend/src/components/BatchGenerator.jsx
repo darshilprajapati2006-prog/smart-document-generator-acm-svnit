@@ -123,10 +123,10 @@ export default function BatchGenerator() {
     <div className="batch-container page-panel batch-page">
       <div className="page-panel-heading batch-heading">
         <div>
-          <h2 style={{ fontSize: "1.3rem", fontWeight: "700", color: "#0f172a", margin: 0 }}>
-            ⚡ Batch Document Generation (Feature 3)
+          <h2 className="panel-title">
+            ⚡ Batch Document Generation
           </h2>
-          <p style={{ margin: "4px 0 0 0", color: "#64748b", fontSize: "0.9rem" }}>
+          <p className="panel-subtitle">
             Queue and generate multiple official documents concurrently with error isolation and ZIP download.
           </p>
         </div>
