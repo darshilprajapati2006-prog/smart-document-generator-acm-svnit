@@ -4,9 +4,11 @@ from pydantic import BaseModel
 from app.schemas.executive_meet import ExecutiveMeetRequest
 from app.schemas.bill_certificate import BillCertificateRequest
 from app.schemas.bill_summary import BillSummaryRequest
+from app.schemas.prize_money_receipt import PrizeMoneyReceiptRequest
 from app.services.executive_meet_service import ExecutiveMeetService
 from app.services.bill_certificate_service import BillCertificateService
 from app.services.bill_summary_service import BillSummaryService
+from app.services.prize_money_receipt_service import PrizeMoneyReceiptService
 
 class TemplateDefinition:
     def __init__(
@@ -140,6 +142,36 @@ class TemplateRegistry:
             }
         ))
 
+        # Dedicated official receipt form; banking identifiers remain strings.
+        self.register(TemplateDefinition(
+            id="prize_money_receipt",
+            title="Prize Money Receipt",
+            description="Individual prize payment receipt with account, student, and certification details.",
+            icon="🏆",
+            category="Prize Payment",
+            reference_document="Prize Money Format 2026.pdf",
+            schema_class=PrizeMoneyReceiptRequest,
+            service_class=PrizeMoneyReceiptService,
+            required_fields=[
+                "serial_number", "date", "amount_rupees", "competition_name", "position",
+                "organizing_body", "event_date", "venue", "affiliating_institute",
+                "name_as_per_bank", "bank_name", "branch", "account_number", "ifsc_code",
+                "pan_number", "student_name", "roll_number", "course_semester",
+                "mobile_number", "chairman_name",
+            ],
+            optional_fields=[],
+            field_labels={
+                "serial_number": "Serial Number", "date": "Date", "amount_rupees": "Prize Amount",
+                "competition_name": "Competition / Event", "position": "Position Secured",
+                "organizing_body": "Organizing Body", "event_date": "Event Date", "venue": "Venue",
+                "affiliating_institute": "Affiliating Institute", "name_as_per_bank": "Name as per Bank Account",
+                "bank_name": "Bank Name", "branch": "Branch", "account_number": "Account Number",
+                "ifsc_code": "IFSC Code", "pan_number": "PAN Card Number", "student_name": "Student Name",
+                "roll_number": "Roll Number", "course_semester": "Course and Semester",
+                "mobile_number": "Mobile Number", "chairman_name": "Chairman Name",
+            },
+        ))
+
         # 2. Bill Certificate
         self.register(TemplateDefinition(
             id="bill_certificate",
@@ -235,7 +267,10 @@ class TemplateRegistry:
         return self._templates.get(template_id)
 
     def list_all(self) -> List[Dict[str, Any]]:
-        return [t.to_dict() for t in self._templates.values()]
+        display_order = ("exec_meet", "prize_money_receipt", "bill_summary", "bill_certificate")
+        ordered = [self._templates[key] for key in display_order if key in self._templates]
+        ordered.extend(template for key, template in self._templates.items() if key not in display_order)
+        return [template.to_dict() for template in ordered]
 
     def validate_template_exists(self, template_id: str) -> bool:
         return template_id in self._templates

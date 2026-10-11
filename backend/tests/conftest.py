@@ -2,6 +2,7 @@ import pytest
 import os
 from app.core import firebase_auth
 from app.core.security import decode_access_token
+from app.db.seed import seed_database
 
 
 def _test_firebase_token(token):
@@ -25,6 +26,9 @@ def _test_firebase_token(token):
 def configure_test_firebase_environment(monkeypatch, request):
     """Replace Firebase's network-backed verifier with deterministic test token fixtures."""
     monkeypatch.setattr(firebase_auth, "verify_firebase_id_token", _test_firebase_token)
+    # TestClient does not run the ASGI lifespan unless used as a context manager.
+    # Initialize the isolated test database here so route tests exercise the app schema.
+    seed_database()
 
 
 @pytest.fixture(scope="session", autouse=True)

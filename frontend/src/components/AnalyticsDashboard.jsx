@@ -50,8 +50,9 @@ export default function AnalyticsDashboard() {
           >
             <option value="">All Document Types</option>
             <option value="exec_meet">Executive Meet</option>
-            <option value="bill_certificate">Bill Certificate</option>
+            <option value="prize_money_receipt">Prize Money Receipt</option>
             <option value="bill_summary">Bill Summary</option>
+            <option value="bill_certificate">Bill Certi</option>
           </select>
           <button type="button" className="secondary-btn" onClick={handleRefresh} style={{ padding: "6px 12px", fontSize: "0.85rem" }}>
             🔄 Refresh
@@ -108,12 +109,16 @@ export default function AnalyticsDashboard() {
                   <span style={{ fontWeight: "700" }}>{metrics.documents_by_type?.exec_meet || 0}</span>
                 </div>
                 <div style={{ display: "flex", justifyContent: "space-between", fontSize: "0.88rem" }}>
-                  <span>Bill Certificate:</span>
-                  <span style={{ fontWeight: "700" }}>{metrics.documents_by_type?.bill_certificate || 0}</span>
+                  <span>Prize Money Receipt:</span>
+                  <span style={{ fontWeight: "700" }}>{metrics.documents_by_type?.prize_money_receipt || 0}</span>
                 </div>
                 <div style={{ display: "flex", justifyContent: "space-between", fontSize: "0.88rem" }}>
                   <span>Bill Summary:</span>
                   <span style={{ fontWeight: "700" }}>{metrics.documents_by_type?.bill_summary || 0}</span>
+                </div>
+                <div style={{ display: "flex", justifyContent: "space-between", fontSize: "0.88rem" }}>
+                  <span>Bill Certi:</span>
+                  <span style={{ fontWeight: "700" }}>{metrics.documents_by_type?.bill_certificate || 0}</span>
                 </div>
               </div>
             </div>

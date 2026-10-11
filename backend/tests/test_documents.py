@@ -8,6 +8,8 @@ from app.services.bill_summary_service import BillSummaryService
 from app.schemas.executive_meet import ExecutiveMeetRequest
 from app.schemas.bill_certificate import BillCertificateRequest, BillItem
 from app.schemas.bill_summary import BillSummaryRequest, BillSummaryRow
+from docx import Document
+from io import BytesIO
 
 client = TestClient(app, headers={"Authorization": "Bearer test-firebase:usr-author-01:author@svnit.acm.org:1"})
 
@@ -31,6 +33,62 @@ def test_list_templates():
     assert "exec_meet" in ids
     assert "bill_certificate" in ids
     assert "bill_summary" in ids
+    assert "prize_money_receipt" in ids
+    assert ids.index("exec_meet") < ids.index("prize_money_receipt") < ids.index("bill_summary") < ids.index("bill_certificate")
+
+
+def test_prize_money_receipt_generation_and_download():
+    payload = {
+        "serial_number": "PM-2026-042", "date": "11/10/2026", "amount_rupees": "12500.50",
+        "competition_name": "SVNIT Innovation Challenge", "position": "First Prize",
+        "organizing_body": "ACM Student Chapter", "event_date": "08/10/2026",
+        "venue": "SVNIT Surat", "affiliating_institute": "SVNIT Surat",
+        "name_as_per_bank": "Test Student", "bank_name": "Test Bank", "branch": "Surat",
+        "account_number": "000012340056", "ifsc_code": "test0001234", "pan_number": "abcde1234f",
+        "student_name": "Test Student", "roll_number": "I26AI007", "course_semester": "B.Tech, Semester 1",
+        "mobile_number": "9000000000", "chairman_name": "Test Chairman",
+    }
+    response = client.post("/api/documents/prize-money-receipt/generate", json=payload)
+    assert response.status_code == 200, response.text
+    data = response.json()
+    assert data["document_type"] == "prize_money_receipt"
+    assert data["files"]["pdf"]["filename"].endswith(".pdf")
+
+    docx_response = client.get(data["files"]["docx"]["download_url"])
+    pdf_response = client.get(data["files"]["pdf"]["download_url"])
+    assert docx_response.status_code == pdf_response.status_code == 200
+    assert len(pdf_response.content) > 1000
+    assert pdf_response.content.startswith(b"%PDF-")
+    doc = Document(BytesIO(docx_response.content))
+    text = "\n".join(p.text for p in doc.paragraphs)
+    text += "\n" + "\n".join(cell.text for table in doc.tables for row in table.rows for cell in row.cells)
+    for value in ("SVNIT Innovation Challenge", "₹ 12,500.50", "000012340056", "TEST0001234", "ABCDE1234F", "I26AI007"):
+        assert value in text
+
+
+def test_prize_money_receipt_rejects_missing_and_invalid_amount():
+    response = client.post("/api/documents/prize-money-receipt/generate", json={})
+    assert response.status_code == 422
+    payload = {
+        "serial_number": "PM-1", "date": "11/10/2026", "amount_rupees": "-1",
+        "competition_name": "Event", "position": "First", "organizing_body": "ACM",
+        "event_date": "08/10/2026", "venue": "SVNIT", "affiliating_institute": "SVNIT",
+        "name_as_per_bank": "Student", "bank_name": "Bank", "branch": "Surat",
+        "account_number": "0001", "ifsc_code": "TEST0001234", "pan_number": "ABCDE1234F",
+        "student_name": "Student", "roll_number": "I26AI007", "course_semester": "B.Tech Sem 1",
+        "mobile_number": "9000000000", "chairman_name": "Chair",
+    }
+    response = client.post("/api/documents/prize-money-receipt/generate", json=payload)
+    assert response.status_code == 422
+
+
+def test_prize_money_receipt_requires_author_role():
+    response = client.post(
+        "/api/documents/prize-money-receipt/generate",
+        json={},
+        headers={"Authorization": "Bearer test-firebase:usr-viewer-01:viewer@svnit.acm.org:1"},
+    )
+    assert response.status_code == 403
 
 def test_executive_meet_generation(tmp_path):
     payload = {

@@ -62,6 +62,12 @@ def test_classifier_reimbursement_prompt_recommends_bill_summary():
     assert data["recommended_type"] == "bill_summary"
     assert data["confidence"] in ["high", "medium"]
 
+def test_classifier_prize_money_receipt_is_distinct_from_bill_summary():
+    prompt = "Create a prize money receipt for a student who secured first position, with PAN card and bank details."
+    res = client.post("/api/documents/classify", json={"prompt": prompt})
+    assert res.status_code == 200
+    assert res.json()["recommended_type"] == "prize_money_receipt"
+
 def test_classifier_ambiguous_prompt_flags_ambiguity():
     prompt = "ACM general notification for members."
     res = client.post("/api/documents/classify", json={"prompt": prompt})

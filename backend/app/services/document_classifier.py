@@ -4,6 +4,7 @@ Classifies natural-language prompts to recommend the optimal template among:
 - Executive Meet (exec_meet)
 - Bill Certificate (bill_certificate)
 - Bill Summary (bill_summary)
+- Prize Money Receipt (prize_money_receipt)
 
 Provides confidence scores, classification rationale, ambiguity detection,
 and respects explicit user overrides.
@@ -38,7 +39,7 @@ class DocumentClassifier:
         },
         "bill_summary": {
             "strong": [
-                r"\b(bill\s+summary|reimbursement\s+summary|expense\s+summary|prize\s+money)\b",
+                r"\b(bill\s+summary|reimbursement\s+summary|expense\s+summary|prize\s+distribution)\b",
                 r"\b(reimburse|reimbursement|prize\s+distribution|contingency\s+summary)\b",
                 r"\b(recipients?|winners?|paid\s+to|account\s+details|ifsc)\b",
                 r"\b(multiple\s+students|travel\s+expense|food\s+expense|printing\s+expense)\b"
@@ -46,6 +47,10 @@ class DocumentClassifier:
             "context": [
                 r"\b(summary|cost\s+incurred|total\s+amount|breakdown|participants\s+paid)\b"
             ]
+        }
+        ,"prize_money_receipt": {
+            "strong": [r"\b(prize\s+money\s+receipt|receipt\s+of\s+prize\s+money)\b"],
+            "context": [r"\b(position\s+secured|pan\s+card|affiliating\s+institute)\b"],
         }
     }
 
@@ -66,8 +71,8 @@ class DocumentClassifier:
                 "missing_information": ["All prompt details are missing."]
             }
 
-        scores = {"exec_meet": 0, "bill_certificate": 0, "bill_summary": 0}
-        reasons = {"exec_meet": [], "bill_certificate": [], "bill_summary": []}
+        scores = {doc_type: 0 for doc_type in cls.PATTERNS}
+        reasons = {doc_type: [] for doc_type in cls.PATTERNS}
 
         lower = text.lower()
 
@@ -134,6 +139,11 @@ class DocumentClassifier:
         elif top_type == "bill_summary":
             if not re.search(r"\b(reimburse|paid|rs\.?|inr|₹|\d{3,})\b", lower):
                 missing.append("Recipient payment amounts")
+        elif top_type == "prize_money_receipt":
+            if not re.search(r"\b\d+(?:\.\d{1,2})?\b", lower):
+                missing.append("Prize Amount")
+            if not re.search(r"\b(student|winner|recipient)\b", lower):
+                missing.append("Student Name")
 
         # Respect explicit selection
         override_note = ""

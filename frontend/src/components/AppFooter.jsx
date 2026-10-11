@@ -45,9 +45,10 @@ export default function AppFooter({ onNavigate, onManageUsers, canManageUsers })
         <nav className="app-footer-column" aria-labelledby="footer-documents-title">
           <h2 id="footer-documents-title">Documents</h2>
           <FooterAction onClick={() => onNavigate("create", "exec_meet", "create")}>Permission Document</FooterAction>
-          <FooterAction onClick={() => onNavigate("create", "bill_summary", "create")}>Prize Money · Bill Summary</FooterAction>
+          <FooterAction onClick={() => onNavigate("create", "prize_money_receipt", "create")}>Prize Money Receipt</FooterAction>
+          <FooterAction onClick={() => onNavigate("history")}>Submitted</FooterAction>
           <FooterAction onClick={() => onNavigate("create", "bill_summary", "create")}>Bill Summary</FooterAction>
-          <FooterAction onClick={() => onNavigate("create", "bill_certificate", "create")}>Bill Certificate</FooterAction>
+          <FooterAction onClick={() => onNavigate("create", "bill_certificate", "create")}>Bill Certi</FooterAction>
         </nav>
 
         <section className="app-footer-column app-footer-information" aria-labelledby="footer-info-title">

@@ -9,13 +9,14 @@ import ClausesModal from "./components/ClausesModal";
 import LoginPage from "./components/LoginPage";
 import AdminBootstrapPage from "./components/AdminBootstrapPage";
 import UserManagementModal from "./components/UserManagementModal";
-import RoleRequestModal from "./components/RoleRequestModal";
+import RoleRequestPage from "./components/RoleRequestPage";
 import AppFooter from "./components/AppFooter";
 import {
   checkBackendHealth,
   generateExecutiveMeet,
   generateBillCertificate,
   generateBillSummary,
+  generatePrizeMoneyReceipt,
   extractFromNLP,
   classifyPrompt,
   logoutUser,
@@ -26,44 +27,65 @@ import {
   getFullDownloadUrl,
 } from "./services/documentApi";
 
-// Document Selection Cards with Reference/Mock Example Metadata
+// Document-generation priorities. Submitted opens the existing workflow history.
 const documentCards = [
   {
     id: "exec_meet",
-    title: "Executive Meet",
-    description: "Event proposals, official schedules and permission requests for ACM activities.",
+    priority: 1,
+    title: "Permission Document",
+    description: "Prepare an ACM SVNIT event permission request using the official event schedule and signatory layout.",
     icon: "📋",
-    mockExample: {
-      eventName: "ACM AI & ML Workshop",
-      venue: "Seminar Hall 402, SVNIT Surat",
-      participants: "120 Attendees",
-      summary: "Official permission note for hall reservation & team coordination.",
-    },
   },
   {
-    id: "bill_certificate",
-    title: "Bill Certificate",
-    description: "Recurring expenditure certification, dynamic line items, supplier & payment details.",
-    icon: "🧾",
-    mockExample: {
-      chapterName: "ACM (Code: 6/52)",
-      supplier: "ABC Stationery & Prints",
-      itemsPreview: "25 Notebooks + 10 Pen Sets",
-      summary: "SVNIT Form BC-R expenditure certificate with subtotal & tax verification.",
-    },
+    id: "prize_money_receipt",
+    priority: 2,
+    title: "Prize Money Receipt",
+    description: "Create an individual prize receipt with validated amount, student, and bank-account details.",
+    icon: "🏆",
+  },
+  {
+    id: "submitted",
+    priority: 3,
+    title: "Submitted",
+    description: "View submitted documents, their current status, approval history, and available actions.",
+    icon: "⏳",
+    workflowOnly: true,
   },
   {
     id: "bill_summary",
+    priority: 4,
     title: "Bill Summary",
-    description: "Reimbursement summary, multiple recipients, prize distributions, and bank details.",
+    description: "Prepare a multi-recipient reimbursement or payment summary with existing total calculations.",
     icon: "💳",
-    mockExample: {
-      eventTitle: "SIH Internal Hackathon",
-      recipientsPreview: "Rahul (₹1,500), Priya (₹800), Amit (₹1,200)",
-      summary: "Multi-recipient reimbursement breakdown with 3-officer signature blocks.",
-    },
+  },
+  {
+    id: "bill_certificate",
+    priority: 5,
+    title: "Bill Certi",
+    description: "Complete the existing SVNIT recurring-expenditure certificate with itemized totals and signatures.",
+    icon: "🧾",
   },
 ];
+const ADMIN_EMAILS = ["admin@svnit.acm.org", "i25ai007@aid.svnit.ac.in", "ddprajapati916@gmail.com"];
+const permissionRequiredFields = [
+  ["ref_no", "Reference Number"], ["date", "Document Date"], ["submitted_to", "Submitted To"],
+  ["subject", "Subject"], ["event_name", "Event Name"], ["event_date", "Event Date"],
+  ["venue", "Venue"], ["time_from", "Start Time"], ["time_to", "End Time"],
+  ["brief_description", "Brief Description"], ["objective", "Objective"],
+  ["participants", "Number of Participants"], ["organizers", "Event Organizers"],
+  ["lead_name", "Student Lead Name"], ["lead_designation", "Student Lead Designation"],
+  ["lead_admission_no", "Student Admission Number"], ["lead_branch", "Student Branch"],
+  ["tech_assist_name", "Technical Assistant Name"], ["tech_assist_designation", "Technical Assistant Designation"],
+  ["tech_assist_branch", "Technical Assistant Branch"], ["faculty_incharge_name", "Faculty In-Charge Name"],
+  ["faculty_incharge_designation", "Faculty In-Charge Designation"], ["faculty_incharge_branch", "Faculty In-Charge Department"],
+  ["faculty_chairman_name", "Faculty Chairman Name"], ["faculty_chairman_designation", "Faculty Chairman Designation"],
+  ["faculty_chairman_branch", "Faculty Chairman Department"],
+];
+
+function formatReceiptDate(value) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value || "");
+  return match ? `${match[3]}/${match[2]}/${match[1]}` : value;
+}
 
 // Optional Mock/Demo Data (Used strictly as reference; never auto-populated into actual initial form state)
 const mockDemoData = {
@@ -279,6 +301,29 @@ const emptyBillSummaryState = {
   club_name: "ACM NIT-Surat",
 };
 
+const emptyPrizeMoneyState = {
+  serial_number: "",
+  date: "",
+  amount_rupees: "",
+  competition_name: "",
+  position: "",
+  organizing_body: "",
+  event_date: "",
+  venue: "",
+  affiliating_institute: "",
+  name_as_per_bank: "",
+  bank_name: "",
+  branch: "",
+  account_number: "",
+  ifsc_code: "",
+  pan_number: "",
+  student_name: "",
+  roll_number: "",
+  course_semester: "",
+  mobile_number: "",
+  chairman_name: "",
+};
+
 export default function App() {
   const [selectedType, setSelectedType] = useState("exec_meet");
 
@@ -286,6 +331,7 @@ export default function App() {
   const [execData, setExecData] = useState(emptyExecState);
   const [billCertData, setBillCertData] = useState(emptyBillCertState);
   const [billSummaryData, setBillSummaryData] = useState(emptyBillSummaryState);
+  const [prizeMoneyData, setPrizeMoneyData] = useState(emptyPrizeMoneyState);
 
   // Review & Generation Flow
   const [reviewState, setReviewState] = useState(null);
@@ -303,8 +349,6 @@ export default function App() {
   // Good-to-Have Features State
   const [lang, setLang] = useState("en"); // "en" | "hi" | "gu"
   const [activeTab, setActiveTab] = useState("create"); // "create" | "batch" | "history" | "templates" | "analytics"
-  const ADMIN_EMAILS = ["admin@svnit.acm.org", "i25ai007@aid.svnit.ac.in", "ddprajapati916@gmail.com"];
-
   const [currentUser, setCurrentUser] = useState(() => {
     try {
       const saved = localStorage.getItem("acm_doc_user");
@@ -339,7 +383,7 @@ export default function App() {
   const [authChecking, setAuthChecking] = useState(true);
   const [bootstrapMode, setBootstrapMode] = useState(() => new URLSearchParams(window.location.search).get("bootstrap-admin") === "1");
   const [showUserMgmt, setShowUserMgmt] = useState(false);
-  const [showRoleRequest, setShowRoleRequest] = useState(false);
+  const [roleRequestReturnTab, setRoleRequestReturnTab] = useState("create");
   const [recommendation, setRecommendation] = useState(null);
   const [showClausesModal, setShowClausesModal] = useState(false);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
@@ -438,7 +482,13 @@ export default function App() {
 
   // Document Type Switching
   function handleTypeChange(type) {
+    if (type === "submitted") {
+      setSelectedDocIdForHistory("");
+      setActiveTab("history");
+      return;
+    }
     setSelectedType(type);
+    setActiveTab("create");
     setReviewState(null);
     setGeneratedResult(null);
     setError("");
@@ -453,6 +503,8 @@ export default function App() {
       setBillCertData(emptyBillCertState);
     } else if (selectedType === "bill_summary") {
       setBillSummaryData(emptyBillSummaryState);
+    } else if (selectedType === "prize_money_receipt") {
+      setPrizeMoneyData(emptyPrizeMoneyState);
     }
     setReviewState(null);
     setGeneratedResult(null);
@@ -797,8 +849,8 @@ export default function App() {
   let formSubtitle = "";
 
   if (selectedType === "exec_meet") {
-    dynamicFormHeading = execData.event_name.trim() || "Executive Meet";
-    formSubtitle = "Event proposals, official schedules and permission requests for ACM activities.";
+    dynamicFormHeading = execData.event_name.trim() || "Permission Document";
+    formSubtitle = "Official ACM SVNIT event permission request following the supplied reference layout.";
   } else if (selectedType === "bill_certificate") {
     if (billCertData.title?.trim()) {
       dynamicFormHeading = billCertData.title.trim();
@@ -817,6 +869,9 @@ export default function App() {
       dynamicFormHeading = "Bill Summary";
     }
     formSubtitle = "Official reimbursement and prize distribution summary table.";
+  } else if (selectedType === "prize_money_receipt") {
+    dynamicFormHeading = prizeMoneyData.competition_name.trim() || "Prize Money Receipt";
+    formSubtitle = "Official individual prize payment receipt with student and bank details.";
   }
 
   // REVIEW HANDLER
@@ -826,8 +881,9 @@ export default function App() {
     setGeneratedResult(null);
 
     if (selectedType === "exec_meet") {
-      if (!execData.event_name.trim() || !execData.event_date.trim() || !execData.venue.trim()) {
-        setError("Please enter the Event Name, Event Date, and Venue before proceeding.");
+      const missing = permissionRequiredFields.filter(([key]) => !String(execData[key] ?? "").trim()).map(([, label]) => label);
+      if (missing.length) {
+        setError(`Please complete the required fields: ${missing.join(", ")}.`);
         return;
       }
       setReviewState({
@@ -835,30 +891,30 @@ export default function App() {
         displayHeading: execData.event_name,
         data: { ...execData },
         displayFields: [
-          { label: "Reference Number", value: execData.ref_no || "[To be assigned]" },
-          { label: "Document Date", value: execData.date || "[Current Date]" },
-          { label: "Submitted To", value: execData.submitted_to || "HoD (CSE Dept.)" },
+          { label: "Reference Number", value: execData.ref_no },
+          { label: "Document Date", value: execData.date },
+          { label: "Submitted To", value: execData.submitted_to },
           { label: "Event Name", value: execData.event_name },
           {
             label: "Event Schedule",
             value: `${execData.event_date}${execData.time_from ? ` (${execData.time_from} - ${execData.time_to || "End"})` : ""}`,
           },
           { label: "Venue", value: execData.venue },
-          { label: "Expected Participants", value: execData.participants || "Unspecified" },
-          { label: "Mode of Conduct", value: execData.mode || "Offline" },
-          { label: "Organizing Club", value: execData.organizers || "ACM SVNIT Chapter" },
-          { label: "Objective", value: execData.objective || "Unspecified" },
+          { label: "Expected Participants", value: execData.participants },
+          { label: "Mode of Conduct", value: execData.mode },
+          { label: "Organizing Club", value: execData.organizers },
+          { label: "Objective", value: execData.objective },
           {
             label: "Student Chairperson",
-            value: execData.lead_name ? `${execData.lead_name} (${execData.lead_designation || "Chairperson"})` : "[Signature placeholder]",
+            value: `${execData.lead_name} (${execData.lead_designation})`,
           },
           {
             label: "Faculty In-Charge",
-            value: execData.faculty_incharge_name || "[Signature placeholder]",
+            value: execData.faculty_incharge_name,
           },
           {
             label: "Faculty Chairman",
-            value: execData.faculty_chairman_name || "[Signature placeholder]",
+            value: execData.faculty_chairman_name,
           },
         ],
       });
@@ -916,11 +972,56 @@ export default function App() {
           total: summaryGrandTotal,
         },
       });
+    } else if (selectedType === "prize_money_receipt") {
+      const requiredFields = [
+        ["serial_number", "Serial Number"], ["date", "Date"], ["amount_rupees", "Prize Amount"],
+        ["competition_name", "Competition / Event"], ["position", "Position Secured"],
+        ["organizing_body", "Organizing Body"], ["event_date", "Event Date"], ["venue", "Venue"],
+        ["affiliating_institute", "Affiliating Institute"], ["name_as_per_bank", "Name as per Bank Account"],
+        ["bank_name", "Bank Name"], ["branch", "Branch"], ["account_number", "Account Number"],
+        ["ifsc_code", "IFSC Code"], ["pan_number", "PAN Card Number"], ["student_name", "Student Name"],
+        ["roll_number", "Roll Number"], ["course_semester", "Course and Semester"],
+        ["mobile_number", "Mobile Number"], ["chairman_name", "Chairman Name"],
+      ];
+      const missing = requiredFields.filter(([key]) => !String(prizeMoneyData[key] ?? "").trim()).map(([, label]) => label);
+      const amount = String(prizeMoneyData.amount_rupees).trim();
+      if (missing.length) {
+        setError(`Please complete the required fields: ${missing.join(", ")}.`);
+        return;
+      }
+      if (!/^\d+(?:\.\d{1,2})?$/.test(amount) || !Number.isFinite(Number(amount)) || Number(amount) < 0) {
+        setError("Enter a valid non-negative prize amount with up to two decimal places.");
+        return;
+      }
+      setReviewState({
+        type: "Prize Money Receipt",
+        displayHeading: prizeMoneyData.competition_name,
+        data: { ...prizeMoneyData },
+        displayFields: [
+          { label: "Serial Number", value: prizeMoneyData.serial_number },
+          { label: "Date", value: formatReceiptDate(prizeMoneyData.date) },
+          { label: "Prize Amount", value: `₹${Number(amount).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` },
+          { label: "Competition / Event", value: prizeMoneyData.competition_name },
+          { label: "Position Secured", value: prizeMoneyData.position },
+          { label: "Organizing Body", value: prizeMoneyData.organizing_body },
+          { label: "Event Date & Venue", value: `${formatReceiptDate(prizeMoneyData.event_date)} · ${prizeMoneyData.venue}` },
+          { label: "Affiliating Institute", value: prizeMoneyData.affiliating_institute },
+          { label: "Bank / Branch", value: `${prizeMoneyData.bank_name} · ${prizeMoneyData.branch}` },
+          { label: "Account Number", value: `••••${prizeMoneyData.account_number.slice(-4)}` },
+          { label: "IFSC Code", value: prizeMoneyData.ifsc_code.toUpperCase() },
+          { label: "PAN Card Number", value: `••••${prizeMoneyData.pan_number.slice(-4).toUpperCase()}` },
+          { label: "Student", value: `${prizeMoneyData.student_name} · ${prizeMoneyData.roll_number}` },
+          { label: "Course and Semester", value: prizeMoneyData.course_semester },
+          { label: "Mobile Number", value: prizeMoneyData.mobile_number },
+          { label: "Chairman", value: prizeMoneyData.chairman_name },
+        ],
+      });
     }
   }
 
   // GENERATE DOCUMENT HANDLER
   async function handleGenerateDocument() {
+    if (isGenerating) return;
     if (currentRole === "viewer") {
       setError("Viewer role has read-only access. Only Author or Admin can generate official documents.");
       return;
@@ -933,28 +1034,21 @@ export default function App() {
     try {
       let result;
       if (selectedType === "exec_meet") {
-        const missing = [];
-        if (!execData.event_name.trim()) missing.push("Event Name");
-        if (!execData.event_date.trim()) missing.push("Event Date");
-        if (!execData.venue.trim()) missing.push("Venue");
-        if (!execData.time_from.trim()) missing.push("Start Time");
-        if (!execData.time_to.trim()) missing.push("End Time");
-        if (!execData.brief_description.trim()) missing.push("Brief Description");
+        const missing = permissionRequiredFields.filter(([key]) => !String(execData[key] ?? "").trim()).map(([, label]) => label);
         if (missing.length > 0) {
           setError(`Cannot generate document. Missing required fields: ${missing.join(", ")}. Please complete them in the form.`);
           setIsGenerating(false);
           return;
         }
 
-        const todayFormatted = new Date().toISOString().split("T")[0].split("-").reverse().join("/");
         result = await generateExecutiveMeet({
           ...execData,
-          date: execData.date.trim() || todayFormatted,
-          ref_no: execData.ref_no.trim() || "ACM/26-27/ROOM/001",
-          submitted_to: execData.submitted_to.trim() || "HoD(CSE Dept.)",
-          subject: execData.subject.trim() || `Requesting Permission to Conduct ${execData.event_name} in ${execData.venue}`,
+          date: execData.date.trim(),
+          ref_no: execData.ref_no.trim(),
+          submitted_to: execData.submitted_to.trim(),
+          subject: execData.subject.trim(),
           brief_description: execData.brief_description.trim(),
-          objective: execData.objective.trim() || `To successfully conduct ${execData.event_name} for students.`,
+          objective: execData.objective.trim(),
         });
       } else if (selectedType === "bill_certificate") {
         const missing = [];
@@ -1005,6 +1099,21 @@ export default function App() {
             account_no: r.account_no || "",
             ifsc_code: r.ifsc_code || "",
           })),
+        });
+      } else if (selectedType === "prize_money_receipt") {
+        const amount = String(prizeMoneyData.amount_rupees).trim();
+        if (!/^\d+(?:\.\d{1,2})?$/.test(amount) || !Number.isFinite(Number(amount)) || Number(amount) < 0) {
+          setError("Enter a valid non-negative prize amount with up to two decimal places.");
+          setIsGenerating(false);
+          return;
+        }
+        result = await generatePrizeMoneyReceipt({
+          ...prizeMoneyData,
+          date: formatReceiptDate(prizeMoneyData.date),
+          event_date: formatReceiptDate(prizeMoneyData.event_date),
+          amount_rupees: amount,
+          ifsc_code: prizeMoneyData.ifsc_code.trim().toUpperCase(),
+          pan_number: prizeMoneyData.pan_number.trim().toUpperCase(),
         });
       }
 
@@ -1125,6 +1234,17 @@ export default function App() {
   function navigateToTab(tab) {
     setActiveTab(tab);
     setMobileNavOpen(false);
+  }
+
+  function openRoleRequestPage(event) {
+    event?.currentTarget?.closest("details")?.removeAttribute("open");
+    setRoleRequestReturnTab(activeTab === "role-request" ? "create" : activeTab);
+    setActiveTab("role-request");
+    setMobileNavOpen(false);
+  }
+
+  function closeRoleRequestPage() {
+    setActiveTab(roleRequestReturnTab === "role-request" ? "create" : roleRequestReturnTab);
   }
 
   function navigateFromFooter(tab, documentType = null, targetId = null) {
@@ -1271,7 +1391,7 @@ export default function App() {
           </div>
           <div className="topbar-context">
             <div className="breadcrumb" aria-label="Current workspace">
-              <span className="breadcrumb-root">Workspace</span><span aria-hidden="true">/</span> {activeTab.toUpperCase()} <span aria-hidden="true">/</span> {selectedDocConfig.title}
+              <span className="breadcrumb-root">Workspace</span><span aria-hidden="true">/</span> {activeTab.replaceAll("-", " ").toUpperCase()} <span aria-hidden="true">/</span> {selectedDocConfig.title}
             </div>
           </div>
 
@@ -1284,7 +1404,7 @@ export default function App() {
             {currentUser.is_verified === 0 && <span className="verification-badge" title="Email verification required">Unverified</span>}
 
             {currentRole === "admin" && <button type="button" onClick={() => setShowUserMgmt(true)} className="header-action admin-users-action">Users</button>}
-            {currentRole !== "admin" && <button type="button" onClick={() => setShowRoleRequest(true)} className="header-action request-role-action">Request role</button>}
+            {currentRole !== "admin" && <button type="button" onClick={openRoleRequestPage} className="header-action request-role-action">Request role</button>}
 
             <label className="language-control" title="Switch interface language">
               <span aria-hidden="true">🌐</span>
@@ -1311,7 +1431,7 @@ export default function App() {
               <div className="mobile-account-popover">
                 {currentUser.is_verified === 0 && <span className="verification-badge">Email unverified</span>}
                 {currentRole === "admin" && <button type="button" onClick={() => setShowUserMgmt(true)} className="header-action">User management</button>}
-                {currentRole !== "admin" && <button type="button" onClick={() => setShowRoleRequest(true)} className="header-action">Request role</button>}
+                {currentRole !== "admin" && <button type="button" onClick={openRoleRequestPage} className="header-action">Request role</button>}
                 <label className="language-control"><span aria-hidden="true">🌐</span><select value={lang} onChange={(e) => setLang(e.target.value)} aria-label="Interface language"><option value="en">English</option><option value="hi">हिन्दी</option><option value="gu">ગુજરાતી</option></select></label>
                 <div className="health-indicator" data-state={apiHealthStatus} role="status"><span className="health-dot" aria-hidden="true" />{apiHealthStatus === "checking" ? "Checking API" : apiOnline ? "API connected" : "API offline"}</div>
                 <button type="button" onClick={handleLogout} className="header-action logout-action">Log out</button>
@@ -1346,6 +1466,10 @@ export default function App() {
         )}
 
         {/* TAB 1: DOCUMENT STUDIO (MAIN GENERATOR) */}
+        {activeTab === "role-request" && (
+          <RoleRequestPage onClose={closeRoleRequestPage} />
+        )}
+
         {activeTab === "create" && (
           <>
             {/* Hero Section */}
@@ -1358,10 +1482,7 @@ export default function App() {
                   <br />
                   <span>Skip the repetitive work.</span>
                 </h1>
-                <p>
-                  Generate official Executive Meets, Bill Certificates, and Bill Summaries
-                  from your natural language prompts or structured forms.
-                </p>
+                <p>Prepare official permission requests, prize receipts, bill summaries, and expenditure certificates with review and status tracking.</p>
                 <div className="hero-meta"><span>SVNIT · SURAT</span><i /> <span>DOCUMENT OPERATIONS</span></div>
               </div>
               <div className="welcome-art" aria-hidden="true">
@@ -1382,41 +1503,39 @@ export default function App() {
               <div className="section-heading">
                 <div>
                   <h2>Choose a document</h2>
-                  <p>Select the document type. Example reference data is displayed for demonstration.</p>
+                  <p>Choose an official document or open submitted-document status and approval history.</p>
                 </div>
                 <span className="step-label">STEP 01</span>
               </div>
 
               <div className="document-grid">
-                {documentCards.map((doc) => (
-                  <button
-                    type="button"
-                    key={doc.id}
-                    className={`document-card ${selectedType === doc.id ? "selected" : ""}`}
-                    onClick={() => handleTypeChange(doc.id)}
-                    aria-pressed={selectedType === doc.id}
-                  >
-                    <div className="card-top">
-                      <span className="document-icon">{doc.icon}</span>
-                      <span className="selection-indicator">
-                        {selectedType === doc.id ? "✓" : "+"}
-                      </span>
-                    </div>
-                    <div className="document-card-body">
-                      <h3>{doc.title}</h3>
-                      <p>{doc.description}</p>
-                    </div>
-                    <div className="demo-preview-chip">
-                      <span className="demo-chip-badge">Demo Reference</span>
-                      <span className="demo-chip-text">{doc.mockExample.summary}</span>
-                    </div>
-                    <div className="document-card-action">
-                      <span className="card-link">
-                        {selectedType === doc.id ? "Active Document ✓" : "Use this template →"}
-                      </span>
-                    </div>
-                  </button>
-                ))}
+                {documentCards.map((doc) => {
+                  const isSelected = selectedType === doc.id;
+                  return (
+                    <button
+                      type="button"
+                      key={doc.id}
+                      className={`document-card ${isSelected ? "selected" : ""} ${doc.priority === 1 ? "priority-primary" : ""}`}
+                      onClick={() => handleTypeChange(doc.id)}
+                      aria-pressed={isSelected}
+                      aria-label={`Priority ${doc.priority}: ${doc.title}`}
+                    >
+                      <div className="card-top">
+                        <span className="document-icon">{doc.icon}</span>
+                        <span className="document-priority">0{doc.priority}</span>
+                      </div>
+                      <div className="document-card-body">
+                        <h3>{doc.title}</h3>
+                        <p>{doc.description}</p>
+                      </div>
+                      <div className="document-card-action">
+                        <span className="card-link">
+                          {doc.workflowOnly ? "Open document history →" : isSelected ? "Active Document ✓" : "Use this template →"}
+                        </span>
+                      </div>
+                    </button>
+                  );
+                })}
               </div>
             </section>
 
@@ -1464,7 +1583,7 @@ export default function App() {
             )}
 
             {/* NATURAL LANGUAGE QUICK-FILL WORKFLOW */}
-            <div className="nlp-banner">
+            {selectedType !== "prize_money_receipt" && <div className="nlp-banner">
               <div className="nlp-header">
                 <div>
                   <strong>✨ Natural Language Quick-Fill Assistant</strong>
@@ -1548,7 +1667,7 @@ export default function App() {
                   )}
                 </div>
               )}
-            </div>
+            </div>}
 
             {/* STEP 2: DYNAMIC DOCUMENT INFORMATION FORM */}
             <section className="section form-section">
@@ -1594,7 +1713,8 @@ export default function App() {
                         type="button"
                         className="demo-load-btn"
                         onClick={handleLoadMockExample}
-                        title="Load demonstration example reference data"
+                        disabled={selectedType === "prize_money_receipt"}
+                        title={selectedType === "prize_money_receipt" ? "No sample banking data is provided for this receipt." : "Load demonstration example reference data"}
                       >
                         Load Demo Data ⚡
                       </button>
@@ -1812,16 +1932,16 @@ export default function App() {
                           />
                         </label>
                         <label className="field">
-                          <span>Student Lead Name</span>
+                          <span>Student Lead Name *</span>
                           <input
                             type="text"
-                            placeholder="e.g., Ansh Gupta"
+                            placeholder="Enter the student lead's full name"
                             value={execData.lead_name}
                             onChange={(e) => setExecData({ ...execData, lead_name: e.target.value })}
                           />
                         </label>
                         <label className="field">
-                          <span>Student Lead Designation</span>
+                          <span>Student Lead Designation *</span>
                           <input
                             type="text"
                             placeholder="e.g., Chairperson, ACM"
@@ -1832,10 +1952,30 @@ export default function App() {
                           />
                         </label>
                         <label className="field">
-                          <span>Faculty In-Charge Name</span>
+                          <span>Student Admission Number *</span>
+                          <input type="text" maxLength={60} value={execData.lead_admission_no} onChange={(e) => setExecData({ ...execData, lead_admission_no: e.target.value })} />
+                        </label>
+                        <label className="field">
+                          <span>Student Branch *</span>
+                          <input type="text" maxLength={120} value={execData.lead_branch} onChange={(e) => setExecData({ ...execData, lead_branch: e.target.value })} />
+                        </label>
+                        <label className="field">
+                          <span>Technical Assistant Name *</span>
+                          <input type="text" maxLength={160} value={execData.tech_assist_name} onChange={(e) => setExecData({ ...execData, tech_assist_name: e.target.value })} />
+                        </label>
+                        <label className="field">
+                          <span>Technical Assistant Designation *</span>
+                          <input type="text" maxLength={120} value={execData.tech_assist_designation} onChange={(e) => setExecData({ ...execData, tech_assist_designation: e.target.value })} />
+                        </label>
+                        <label className="field">
+                          <span>Technical Assistant Branch *</span>
+                          <input type="text" maxLength={120} value={execData.tech_assist_branch} onChange={(e) => setExecData({ ...execData, tech_assist_branch: e.target.value })} />
+                        </label>
+                        <label className="field">
+                          <span>Faculty In-Charge Name *</span>
                           <input
                             type="text"
-                            placeholder="e.g., Shri. Rakesh P. Gohil"
+                            placeholder="Enter the faculty in-charge's name"
                             value={execData.faculty_incharge_name}
                             onChange={(e) =>
                               setExecData({ ...execData, faculty_incharge_name: e.target.value })
@@ -1843,15 +1983,31 @@ export default function App() {
                           />
                         </label>
                         <label className="field">
-                          <span>Faculty Chairman Name</span>
+                          <span>Faculty In-Charge Designation *</span>
+                          <input type="text" maxLength={120} value={execData.faculty_incharge_designation} onChange={(e) => setExecData({ ...execData, faculty_incharge_designation: e.target.value })} />
+                        </label>
+                        <label className="field">
+                          <span>Faculty In-Charge Department *</span>
+                          <input type="text" maxLength={120} value={execData.faculty_incharge_branch} onChange={(e) => setExecData({ ...execData, faculty_incharge_branch: e.target.value })} />
+                        </label>
+                        <label className="field">
+                          <span>Faculty Chairman Name *</span>
                           <input
                             type="text"
-                            placeholder="e.g., Dr. Sankita J. Patel"
+                            placeholder="Enter the faculty chairman's name"
                             value={execData.faculty_chairman_name}
                             onChange={(e) =>
                               setExecData({ ...execData, faculty_chairman_name: e.target.value })
                             }
                           />
+                        </label>
+                        <label className="field">
+                          <span>Faculty Chairman Designation *</span>
+                          <input type="text" maxLength={120} value={execData.faculty_chairman_designation} onChange={(e) => setExecData({ ...execData, faculty_chairman_designation: e.target.value })} />
+                        </label>
+                        <label className="field">
+                          <span>Faculty Chairman Department *</span>
+                          <input type="text" maxLength={120} value={execData.faculty_chairman_branch} onChange={(e) => setExecData({ ...execData, faculty_chairman_branch: e.target.value })} />
                         </label>
                       </div>
                     </>
@@ -2086,6 +2242,42 @@ export default function App() {
                             onChange={(e) => setBillCertData({ ...billCertData, ifsc_code: e.target.value })}
                           />
                         </label>
+                      </div>
+                    </>
+                  )}
+
+                  {selectedType === "prize_money_receipt" && (
+                    <>
+                      <div className="form-section-title">RECEIPT AND EVENT DETAILS</div>
+                      <div className="form-grid">
+                        <label className="field"><span>Serial Number *</span><input required maxLength={60} value={prizeMoneyData.serial_number} onChange={(e) => setPrizeMoneyData({ ...prizeMoneyData, serial_number: e.target.value })} /></label>
+                        <label className="field"><span>Receipt Date *</span><input required type="date" value={prizeMoneyData.date} onChange={(e) => setPrizeMoneyData({ ...prizeMoneyData, date: e.target.value })} /></label>
+                        <label className="field"><span>Prize Amount (₹) *</span><input required type="number" min="0" step="0.01" inputMode="decimal" value={prizeMoneyData.amount_rupees} onChange={(e) => setPrizeMoneyData({ ...prizeMoneyData, amount_rupees: e.target.value })} /></label>
+                        <label className="field"><span>Competition / Event *</span><input required maxLength={240} value={prizeMoneyData.competition_name} onChange={(e) => setPrizeMoneyData({ ...prizeMoneyData, competition_name: e.target.value })} /></label>
+                        <label className="field"><span>Position Secured *</span><input required maxLength={120} value={prizeMoneyData.position} onChange={(e) => setPrizeMoneyData({ ...prizeMoneyData, position: e.target.value })} /></label>
+                        <label className="field"><span>Organizing Body *</span><input required maxLength={240} value={prizeMoneyData.organizing_body} onChange={(e) => setPrizeMoneyData({ ...prizeMoneyData, organizing_body: e.target.value })} /></label>
+                        <label className="field"><span>Event Date *</span><input required type="date" value={prizeMoneyData.event_date} onChange={(e) => setPrizeMoneyData({ ...prizeMoneyData, event_date: e.target.value })} /></label>
+                        <label className="field"><span>Event Venue *</span><input required maxLength={240} value={prizeMoneyData.venue} onChange={(e) => setPrizeMoneyData({ ...prizeMoneyData, venue: e.target.value })} /></label>
+                      </div>
+
+                      <div className="form-section-title">ACCOUNT DETAILS</div>
+                      <div className="form-grid">
+                        <label className="field full-width"><span>Affiliating Institute *</span><input required maxLength={240} value={prizeMoneyData.affiliating_institute} onChange={(e) => setPrizeMoneyData({ ...prizeMoneyData, affiliating_institute: e.target.value })} /></label>
+                        <label className="field"><span>Name as per Bank Account *</span><input required maxLength={160} autoComplete="off" value={prizeMoneyData.name_as_per_bank} onChange={(e) => setPrizeMoneyData({ ...prizeMoneyData, name_as_per_bank: e.target.value })} /></label>
+                        <label className="field"><span>Bank Name *</span><input required maxLength={160} autoComplete="off" value={prizeMoneyData.bank_name} onChange={(e) => setPrizeMoneyData({ ...prizeMoneyData, bank_name: e.target.value })} /></label>
+                        <label className="field"><span>Branch *</span><input required maxLength={160} autoComplete="off" value={prizeMoneyData.branch} onChange={(e) => setPrizeMoneyData({ ...prizeMoneyData, branch: e.target.value })} /></label>
+                        <label className="field"><span>Account Number *</span><input required maxLength={80} inputMode="numeric" autoComplete="off" value={prizeMoneyData.account_number} onChange={(e) => setPrizeMoneyData({ ...prizeMoneyData, account_number: e.target.value })} /></label>
+                        <label className="field"><span>IFSC Code *</span><input required maxLength={20} autoComplete="off" value={prizeMoneyData.ifsc_code} onChange={(e) => setPrizeMoneyData({ ...prizeMoneyData, ifsc_code: e.target.value.toUpperCase() })} /></label>
+                        <label className="field"><span>PAN Card Number *</span><input required maxLength={20} autoComplete="off" value={prizeMoneyData.pan_number} onChange={(e) => setPrizeMoneyData({ ...prizeMoneyData, pan_number: e.target.value.toUpperCase() })} /></label>
+                      </div>
+
+                      <div className="form-section-title">STUDENT AND CERTIFICATION DETAILS</div>
+                      <div className="form-grid">
+                        <label className="field"><span>Student Name *</span><input required maxLength={160} value={prizeMoneyData.student_name} onChange={(e) => setPrizeMoneyData({ ...prizeMoneyData, student_name: e.target.value })} /></label>
+                        <label className="field"><span>Roll Number *</span><input required maxLength={60} autoComplete="off" value={prizeMoneyData.roll_number} onChange={(e) => setPrizeMoneyData({ ...prizeMoneyData, roll_number: e.target.value })} /></label>
+                        <label className="field"><span>Course and Semester *</span><input required maxLength={120} value={prizeMoneyData.course_semester} onChange={(e) => setPrizeMoneyData({ ...prizeMoneyData, course_semester: e.target.value })} /></label>
+                        <label className="field"><span>Mobile Number *</span><input required type="tel" maxLength={30} autoComplete="tel" value={prizeMoneyData.mobile_number} onChange={(e) => setPrizeMoneyData({ ...prizeMoneyData, mobile_number: e.target.value })} /></label>
+                        <label className="field full-width"><span>Chairman Name *</span><input required maxLength={160} value={prizeMoneyData.chairman_name} onChange={(e) => setPrizeMoneyData({ ...prizeMoneyData, chairman_name: e.target.value })} /></label>
                       </div>
                     </>
                   )}
@@ -2545,7 +2737,6 @@ export default function App() {
           currentUserId={currentUser?.id}
         />
       )}
-      {showRoleRequest && <RoleRequestModal onClose={() => setShowRoleRequest(false)} />}
 
       {/* EMAIL DISTRIBUTION MODAL */}
       {emailModalOpen && (

@@ -375,16 +375,16 @@ export default function UserManagementModal({ isOpen, onClose, currentUserId }) 
             <div className="empty-state">No user accounts found.</div>
           ) : (
             <div className="user-mgmt-table-scroll">
-              <table className="user-mgmt-table">
+              <table className="user-mgmt-table user-mgmt-users-table">
                 <thead>
                   <tr>
-                    <th style={{ width: 200 }}>User</th>
-                    <th style={{ minWidth: 220 }}>Institutional Email</th>
-                    <th style={{ width: 165 }}>Assigned Role</th>
-                    <th style={{ width: 115, textAlign: "center" }}>Status</th>
-                    <th style={{ width: 125, textAlign: "center" }}>Email Verified</th>
-                    <th style={{ width: 160 }}>Created</th>
-                    <th style={{ width: 140, textAlign: "right" }}>Actions</th>
+                    <th>User</th>
+                    <th>Institutional Email</th>
+                    <th>Assigned Role</th>
+                    <th>Status</th>
+                    <th>Email Verified</th>
+                    <th>Created</th>
+                    <th>Actions</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -396,7 +396,7 @@ export default function UserManagementModal({ isOpen, onClose, currentUserId }) 
                     return (
                       <tr key={u.id}>
                         {/* User Cell */}
-                        <td>
+                        <td data-label="User" className="user-mgmt-user-column">
                           <div className="user-mgmt-user-cell">
                             <div className="user-mgmt-avatar" aria-hidden="true">
                               {initials}
@@ -409,12 +409,12 @@ export default function UserManagementModal({ isOpen, onClose, currentUserId }) 
                         </td>
 
                         {/* Email Cell */}
-                        <td className="user-mgmt-email-cell">
+                        <td data-label="Institutional email" className="user-mgmt-email-cell user-mgmt-email-column">
                           {u.email}
                         </td>
 
                         {/* Role Cell */}
-                        <td>
+                        <td data-label="Assigned role" className="user-mgmt-role-column">
                           <select
                             value={u.role}
                             onChange={(e) => handleRoleChange(u.id, e.target.value)}
@@ -430,7 +430,7 @@ export default function UserManagementModal({ isOpen, onClose, currentUserId }) 
                         </td>
 
                         {/* Status Cell */}
-                        <td style={{ textAlign: "center" }}>
+                        <td data-label="Status" className="user-mgmt-status-column" style={{ textAlign: "center" }}>
                           <span className={`user-mgmt-status-badge ${isActive ? "active" : "inactive"}`}>
                             <span className="status-dot" aria-hidden="true" />
                             {isActive ? "Active" : "Inactive"}
@@ -438,19 +438,19 @@ export default function UserManagementModal({ isOpen, onClose, currentUserId }) 
                         </td>
 
                         {/* Email Verified Cell */}
-                        <td style={{ textAlign: "center" }}>
+                        <td data-label="Email verified" className="user-mgmt-verified-column" style={{ textAlign: "center" }}>
                           <span className={`user-mgmt-verified-badge ${u.is_verified ? "verified" : "pending"}`}>
                             {u.is_verified ? "✓ Verified" : "⏳ Pending"}
                           </span>
                         </td>
 
                         {/* Created Cell */}
-                        <td className="user-mgmt-date-cell">
+                        <td data-label="Created" className="user-mgmt-date-cell user-mgmt-created-column">
                           {u.created_at || "—"}
                         </td>
 
                         {/* Actions Cell */}
-                        <td>
+                        <td data-label="Actions" className="user-mgmt-actions-column">
                           <div className="user-mgmt-actions-cell">
                             <button
                               type="button"
@@ -515,7 +515,7 @@ export default function UserManagementModal({ isOpen, onClose, currentUserId }) 
                 <h4>Pending Invitations ({invitations.length})</h4>
               </div>
               <div className="user-mgmt-table-scroll">
-                <table className="user-mgmt-table">
+                <table className="user-mgmt-table user-mgmt-invitations-table">
                   <thead>
                     <tr>
                       <th>Email</th>
@@ -536,21 +536,21 @@ export default function UserManagementModal({ isOpen, onClose, currentUserId }) 
                         : "Pending";
                       return (
                         <tr key={inv.id}>
-                          <td className="user-mgmt-email-cell">{inv.email}</td>
-                          <td>
+                          <td data-label="Email" className="user-mgmt-email-cell">{inv.email}</td>
+                          <td data-label="Role">
                             <span className="user-mgmt-you-badge" style={{ color: "var(--text)" }}>
                               {ROLES.find((r) => r.value === inv.role)?.label || inv.role}
                             </span>
                           </td>
-                          <td>
+                          <td data-label="Status">
                             <span className={`user-mgmt-verified-badge ${inviteStatus === "Pending" ? "pending" : "verified"}`}>
                               {inviteStatus}
                             </span>
                           </td>
-                          <td className="user-mgmt-date-cell">
+                          <td data-label="Expires" className="user-mgmt-date-cell">
                             {new Date(inv.expires_at).toLocaleString()}
                           </td>
-                          <td style={{ textAlign: "right" }}>
+                          <td data-label="Actions" style={{ textAlign: "right" }}>
                             {inviteStatus === "Pending" && (
                               <button
                                 type="button"
@@ -577,7 +577,7 @@ export default function UserManagementModal({ isOpen, onClose, currentUserId }) 
                 <h4>Role Change Requests ({roleRequests.length})</h4>
               </div>
               <div className="user-mgmt-table-scroll">
-                <table className="user-mgmt-table">
+                <table className="user-mgmt-table user-mgmt-requests-table">
                   <thead>
                     <tr>
                       <th>Email</th>
@@ -590,21 +590,21 @@ export default function UserManagementModal({ isOpen, onClose, currentUserId }) 
                   <tbody>
                     {roleRequests.map((request) => (
                       <tr key={request.id}>
-                        <td className="user-mgmt-email-cell">{request.email}</td>
-                        <td>
+                        <td data-label="Email" className="user-mgmt-email-cell">{request.email}</td>
+                        <td data-label="Requested role">
                           <span className="user-mgmt-you-badge" style={{ color: "var(--text)" }}>
                             {request.requested_role.replaceAll("_", " ")}
                           </span>
                         </td>
-                        <td>
+                        <td data-label="Status">
                           <span className={`user-mgmt-verified-badge ${request.status === "pending" ? "pending" : "verified"}`}>
                             {request.status}
                           </span>
                         </td>
-                        <td className="user-mgmt-date-cell">
+                        <td data-label="Submitted" className="user-mgmt-date-cell">
                           {new Date(request.created_at).toLocaleString()}
                         </td>
-                        <td style={{ textAlign: "right" }}>
+                        <td data-label="Actions" style={{ textAlign: "right" }}>
                           {request.status === "pending" && (
                             <div className="user-mgmt-actions-cell">
                               <button

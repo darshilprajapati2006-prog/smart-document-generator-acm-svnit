@@ -2529,3 +2529,115 @@ input[type="file"]::file-selector-button { min-height:32px; margin-right:10px; p
  .auth-form,.auth-message-view { padding:16px 20px 24px; }
  .auth-footer { padding:15px 18px; }
 }
+
+.document-card .document-priority {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--gold);
+  background: var(--surface-soft);
+  font-size: .7rem;
+  font-weight: 800;
+  letter-spacing: .04em;
+}
+.document-card.priority-primary {
+  border-color: rgba(179,155,255,.65);
+}
+.document-card.priority-primary h3 { font-size: 1rem; }
+.document-card:focus-visible { outline: 2px solid var(--focus); outline-offset: 3px; }
+
+/* Role requests use a dedicated workspace page, not a floating modal. */
+.role-request-page {
+  width: min(100%, 900px);
+  align-self: center;
+  margin: clamp(22px, 6vh, 64px) auto 0;
+  padding: clamp(22px, 4vw, 38px);
+}
+.role-request-heading { display:flex; align-items:flex-start; justify-content:space-between; gap:24px; padding-bottom:24px; border-bottom:1px solid var(--line); }
+.role-request-eyebrow { color:var(--gold); font-size:.68rem; font-weight:750; letter-spacing:.14em; }
+.role-request-heading h1 { margin:8px 0 6px; color:var(--text); font:700 clamp(1.45rem,3vw,2rem)/1.2 "Space Grotesk",sans-serif; letter-spacing:-.04em; }
+.role-request-heading p { max-width:540px; margin:0; color:var(--muted); font-size:.9rem; line-height:1.6; }
+.role-request-back { flex:0 0 auto; }
+.role-request-back span { margin-right:5px; }
+.role-request-card { display:grid; grid-template-columns:42px minmax(0,1fr) minmax(250px,.9fr); align-items:start; gap:18px; margin-top:24px; padding:22px; border:1px solid var(--line); border-radius:var(--radius-md); background:var(--surface-raised); }
+.role-request-card-icon { width:42px; height:42px; display:grid; place-items:center; border:1px solid rgba(179,155,255,.24); border-radius:12px; background:rgba(179,155,255,.1); font-size:19px; }
+.role-request-card-copy h2 { margin:2px 0 7px; color:var(--text); font-size:1rem; }
+.role-request-card-copy p { margin:0; color:var(--muted); font-size:.82rem; line-height:1.65; }
+.role-request-form { min-width:0; display:grid; gap:9px; }
+.role-request-form label { color:var(--text-secondary); font-size:.8rem; font-weight:650; }
+.role-request-form select { width:100%; min-height:42px; padding:8px 11px; border:1px solid var(--line); border-radius:var(--radius-sm); color:var(--text); background:var(--surface-soft); font:inherit; font-size:.86rem; }
+.role-request-form select:focus-visible { outline:2px solid var(--focus); outline-offset:2px; }
+.role-request-actions { display:flex; justify-content:flex-end; gap:8px; margin-top:8px; }
+.role-request-feedback { padding:10px 12px; margin:2px 0; border:1px solid var(--line); border-radius:var(--radius-sm); font-size:.8rem; line-height:1.5; }
+.role-request-feedback.success { border-color:rgba(95,201,147,.3); color:#a6e6c3; background:rgba(54,142,97,.12); }
+.role-request-feedback.error { border-color:rgba(237,124,136,.3); color:#ffb6bd; background:rgba(170,56,70,.12); }
+
+/* User rows fit the management panel without horizontal table scrolling. */
+.user-mgmt-card { width:min(1240px,100%); max-height:min(92dvh,1000px); min-height:0; }
+.user-mgmt-body { min-height:0; }
+.user-mgmt-table-scroll { min-width:0; overflow-x:hidden; }
+.user-mgmt-table { width:100%; min-width:0; table-layout:fixed; }
+.user-mgmt-table thead th { padding:11px 9px; white-space:normal; overflow-wrap:anywhere; font-size:.64rem; line-height:1.35; }
+.user-mgmt-table tbody td { min-width:0; padding:10px 9px; overflow-wrap:anywhere; font-size:.75rem; }
+.user-mgmt-users-table th:nth-child(1) { width:16%; }
+.user-mgmt-users-table th:nth-child(2) { width:21%; }
+.user-mgmt-users-table th:nth-child(3) { width:15%; }
+.user-mgmt-users-table th:nth-child(4) { width:10%; }
+.user-mgmt-users-table th:nth-child(5) { width:12%; }
+.user-mgmt-users-table th:nth-child(6) { width:11%; }
+.user-mgmt-users-table th:nth-child(7) { width:15%; }
+.user-mgmt-users-table .user-mgmt-user-cell { min-width:0; gap:7px; }
+.user-mgmt-users-table .user-mgmt-avatar { width:28px; height:28px; flex-basis:28px; }
+.user-mgmt-users-table .user-mgmt-user-name { min-width:0; display:block; overflow-wrap:anywhere; font-size:.73rem; line-height:1.35; }
+.user-mgmt-users-table .user-mgmt-you-badge { display:inline-block; margin:3px 0 0; }
+.user-mgmt-users-table .user-mgmt-email-cell { font-size:.72rem; overflow-wrap:anywhere; }
+.user-mgmt-users-table .user-mgmt-role-select { width:100%!important; min-width:0!important; max-width:100%!important; padding-inline:6px!important; font-size:.7rem!important; }
+.user-mgmt-users-table .user-mgmt-status-badge,.user-mgmt-users-table .user-mgmt-verified-badge { max-width:100%; font-size:.68rem; white-space:normal; }
+.user-mgmt-users-table .user-mgmt-date-cell { font-size:.68rem; line-height:1.4; overflow-wrap:anywhere; }
+.user-mgmt-users-table .user-mgmt-actions-cell { align-items:stretch; flex-wrap:wrap; gap:5px; }
+.user-mgmt-users-table .user-mgmt-toggle-btn { min-height:30px; padding:5px 7px; font-size:.66rem; }
+.user-mgmt-users-table .user-mgmt-delete-btn { width:30px; min-width:30px; height:30px; }
+.user-mgmt-invitations-table th,.user-mgmt-requests-table th { width:auto; }
+.user-mgmt-sub-header { display:flex; align-items:center; justify-content:space-between; gap:12px; }
+
+@media (max-width:900px) {
+  .user-mgmt-backdrop { padding:10px; }
+  .user-mgmt-card { max-height:calc(100dvh - 20px); border-radius:14px; }
+  .user-mgmt-table-scroll { overflow:visible; border:0; background:transparent; }
+  .user-mgmt-table,.user-mgmt-table tbody { display:block; width:100%; }
+  .user-mgmt-table thead { position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0,0,0,0); white-space:nowrap; border:0; }
+  .user-mgmt-table tbody { display:grid; gap:10px; }
+  .user-mgmt-table tbody tr { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); overflow:hidden; border:1px solid var(--line); border-radius:var(--radius-sm); background:var(--surface-soft); }
+  .user-mgmt-table tbody td { min-width:0; display:flex; flex-direction:column; align-items:stretch; justify-content:flex-start; gap:6px; padding:10px 12px; border-bottom:1px solid var(--line); text-align:left!important; }
+  .user-mgmt-table tbody td::before { content:attr(data-label); color:var(--muted); font-size:.62rem; font-weight:750; letter-spacing:.07em; line-height:1.3; text-transform:uppercase; }
+  .user-mgmt-table tbody td.user-mgmt-user-column,.user-mgmt-table tbody td.user-mgmt-email-column,.user-mgmt-table tbody td.user-mgmt-actions-column { grid-column:1 / -1; }
+  .user-mgmt-table tbody td.user-mgmt-user-column .user-mgmt-user-cell { align-items:center; }
+  .user-mgmt-table tbody td.user-mgmt-actions-column .user-mgmt-actions-cell { justify-content:flex-start; }
+  .user-mgmt-table tbody td:last-child { border-bottom:0; }
+  .user-mgmt-users-table .user-mgmt-role-select { max-width:240px!important; }
+  .user-mgmt-users-table .user-mgmt-status-badge,.user-mgmt-users-table .user-mgmt-verified-badge { justify-content:flex-start; }
+}
+@media (max-width:640px) {
+  .role-request-page { margin-top:16px; padding:20px 16px; }
+  .role-request-heading { flex-direction:column; gap:16px; }
+  .role-request-card { grid-template-columns:38px minmax(0,1fr); gap:13px; padding:16px; }
+  .role-request-card-icon { width:38px; height:38px; }
+  .role-request-form { grid-column:1 / -1; }
+  .role-request-back { min-height:38px; }
+}
+@media (max-width:520px) {
+  .user-mgmt-header-left { gap:10px; }
+  .user-mgmt-header-icon { width:36px; height:36px; flex-basis:36px; }
+  .user-mgmt-title { font-size:1rem; }
+  .user-mgmt-subtitle { font-size:.76rem; }
+  .user-mgmt-action-bar { align-items:stretch; }
+  .user-mgmt-stats { font-size:.76rem; }
+  .user-mgmt-action-btns { justify-content:flex-end; }
+  .user-mgmt-action-btns button { min-height:34px; padding-inline:9px; font-size:.72rem; }
+  .user-mgmt-body { gap:16px; }
+  .user-mgmt-table tbody tr { grid-template-columns:1fr 1fr; }
+  .user-mgmt-invite-grid { gap:10px; }
+}

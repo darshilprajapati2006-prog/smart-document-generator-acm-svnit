@@ -113,6 +113,19 @@ export async function generateBillSummary(payload) {
   return res.json();
 }
 
+export async function generatePrizeMoneyReceipt(payload) {
+  const res = await fetch(`${API_BASE_URL}/api/documents/prize-money-receipt/generate`, {
+    method: "POST",
+    headers: getHeaders(),
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || "Prize Money Receipt generation failed.");
+  }
+  return res.json();
+}
+
 // -------------------------------------------------------------
 // Feature 1: Automatic Document-Type Detection
 // -------------------------------------------------------------
