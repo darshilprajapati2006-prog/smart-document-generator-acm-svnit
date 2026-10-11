@@ -359,7 +359,7 @@ export async function completeVerifiedAccountSetup(fullName) {
       Authorization: `Bearer ${token}`,
     },
     body: JSON.stringify({
-      requested_role: "author",
+      requested_role: "viewer",
       full_name: resolvedName,
       email: user.email,
     }),
@@ -427,12 +427,23 @@ export async function getSystemAdminBootstrapStatus() {
 }
 export async function registerUser({ role, full_name, email, password, confirm_password, invitation_token }) {
   if (password !== confirm_password) throw new Error("Passwords do not match.");
-  const allowedRoles = ["viewer", "author", "reviewer", "approver", "template_admin", "admin"];
-  if (!invitation_token && !allowedRoles.includes(role)) {
+  const selfServiceRoles = ["viewer", "author", "reviewer", "approver", "template_admin"];
+  const invitationRoles = [...selfServiceRoles, "admin"];
+  if (!(invitation_token ? invitationRoles : selfServiceRoles).includes(role)) {
     throw new Error("Please select a valid institutional role.");
   }
-  const credential = await createUserWithEmailAndPassword(firebaseAuth, email, password);
-  await updateProfile(credential.user, { displayName: full_name });
+  let credential;
+  try {
+    credential = await createUserWithEmailAndPassword(firebaseAuth, email, password);
+  } catch (error) {
+    if (error.code !== "auth/email-already-in-use") throw error;
+    // Recover the account created by an earlier interrupted signup without
+    // deleting it or changing its Firebase UID.
+    credential = await signInWithEmailAndPassword(firebaseAuth, email, password);
+  }
+  if (!credential.user.displayName && full_name?.trim()) {
+    await updateProfile(credential.user, { displayName: full_name.trim() });
+  }
   const token = await credential.user.getIdToken(true);
   const res = await fetch(`${API_BASE_URL}/api/auth/register`, {
     method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
@@ -444,8 +455,11 @@ export async function registerUser({ role, full_name, email, password, confirm_p
     // can sign in and retry SmartDocs profile setup safely.
     throw new Error(formatApiError(err, "Registration failed."));
   }
-  await sendEmailVerification(credential.user, { url: window.location.origin });
-  return res.json();
+  const verification_email_sent = !credential.user.emailVerified;
+  if (verification_email_sent) {
+    await sendEmailVerification(credential.user, { url: window.location.origin });
+  }
+  return { ...(await res.json()), verification_email_sent };
 }
 
 export async function forgotPassword({ email }) {

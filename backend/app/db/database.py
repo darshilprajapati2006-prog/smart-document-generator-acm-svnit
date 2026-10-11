@@ -85,13 +85,40 @@ def init_db():
             id TEXT PRIMARY KEY,
             user_id TEXT NOT NULL,
             email TEXT NOT NULL,
-            requested_role TEXT NOT NULL CHECK(requested_role IN ('reviewer', 'approver', 'template_admin')),
+            requested_role TEXT NOT NULL CHECK(requested_role IN ('author', 'reviewer', 'approver', 'template_admin')),
             status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending', 'approved', 'rejected')),
             reviewed_by TEXT,
             reviewed_at TEXT,
             created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
         )
         """)
+        # Preserve existing requests while allowing Author access requests too.
+        # SQLite cannot alter a CHECK constraint in place, so rebuild only this
+        # small workflow table when opening a database with the older schema.
+        role_request_schema = conn.execute(
+            "SELECT sql FROM sqlite_master WHERE type='table' AND name='user_role_requests'"
+        ).fetchone()
+        if role_request_schema and "'author'" not in (role_request_schema["sql"] or "").lower():
+            conn.execute("""
+                CREATE TABLE user_role_requests_rebuild (
+                    id TEXT PRIMARY KEY,
+                    user_id TEXT NOT NULL,
+                    email TEXT NOT NULL,
+                    requested_role TEXT NOT NULL CHECK(requested_role IN ('author', 'reviewer', 'approver', 'template_admin')),
+                    status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending', 'approved', 'rejected')),
+                    reviewed_by TEXT,
+                    reviewed_at TEXT,
+                    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            conn.execute("""
+                INSERT INTO user_role_requests_rebuild
+                    (id,user_id,email,requested_role,status,reviewed_by,reviewed_at,created_at)
+                SELECT id,user_id,email,requested_role,status,reviewed_by,reviewed_at,created_at
+                FROM user_role_requests
+            """)
+            conn.execute("DROP TABLE user_role_requests")
+            conn.execute("ALTER TABLE user_role_requests_rebuild RENAME TO user_role_requests")
         conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_user_role_request_pending ON user_role_requests(user_id) WHERE status='pending'")
         # Durable singleton guard survives admin deletion and prevents repeat bootstrap.
         conn.execute("""

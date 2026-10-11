@@ -15,7 +15,6 @@ const ROLES = [
   { value: "reviewer", label: "Reviewer", color: "#e5bb69" },
   { value: "approver", label: "Approver", color: "#5fc993" },
   { value: "template_admin", label: "Template Admin", color: "#d4c6ff" },
-  { value: "admin", label: "System Admin", color: "#ed7c88" },
   { value: "viewer", label: "Viewer", color: "#a29daf" },
 ];
 
@@ -236,7 +235,7 @@ export default function UserManagementModal({ isOpen, onClose, currentUserId }) 
                 <span className="user-mgmt-admin-badge">Admin Restricted</span>
               </div>
               <p className="user-mgmt-subtitle">
-                Manage accounts, assign roles (Author, Reviewer, Approver, Template Admin, System Admin, Viewer), and activate or deactivate access.
+                Manage accounts and assign approved roles. System Admin access is reserved for the configured one-time bootstrap account.
               </p>
             </div>
           </div>
@@ -421,6 +420,7 @@ export default function UserManagementModal({ isOpen, onClose, currentUserId }) 
                             className="user-mgmt-role-select"
                             aria-label={`Assigned role for ${u.full_name || u.email}`}
                           >
+                            {u.role === "admin" && <option value="admin" disabled>System Admin (protected)</option>}
                             {ROLES.map((r) => (
                               <option key={r.value} value={r.value}>
                                 {r.label}

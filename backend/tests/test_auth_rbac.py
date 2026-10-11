@@ -13,6 +13,7 @@ Tests:
 """
 import uuid
 import os
+import sqlite3
 from concurrent.futures import ThreadPoolExecutor
 from urllib.parse import urlparse, parse_qs
 import pytest
@@ -26,6 +27,7 @@ client = TestClient(app)
 @pytest.fixture(autouse=True)
 def setup_db(monkeypatch):
     monkeypatch.setenv("SEED_DEMO_USERS", "true")
+    monkeypatch.setenv("ADMIN_BOOTSTRAP_EMAIL", "admin@svnit.acm.org")
     seed_database()
 
 def helper_login(email: str, password: str) -> dict:
@@ -88,7 +90,9 @@ def test_signup_registration_requires_firebase_email_verification():
     assert client.get("/api/auth/me", headers=firebase_headers(email, uid, True)).status_code == 403
     verified = client.post("/api/auth/session", headers=firebase_headers(email, uid, True))
     assert verified.status_code == 200
-    assert verified.json()["user"]["role"] == "author"
+    assert res.json()["role"] == "viewer"
+    assert res.json()["role_request_submitted"] is True
+    assert verified.json()["user"]["role"] == "viewer"
     assert verified.json()["user"]["is_verified"] == 1
 
 
@@ -107,7 +111,7 @@ def test_verified_firebase_account_can_finish_missing_smartdocs_profile():
 
     session = client.post("/api/auth/session", headers=headers)
     assert session.status_code == 200
-    assert session.json()["user"]["role"] == "author"
+    assert session.json()["user"]["role"] == "viewer"
     assert session.json()["user"]["email"] == email
 
     from app.db.database import get_db
@@ -115,7 +119,7 @@ def test_verified_firebase_account_can_finish_missing_smartdocs_profile():
         row = conn.execute("SELECT firebase_uid, full_name, role, is_verified FROM users WHERE email = ?", (email,)).fetchone()
     assert row["firebase_uid"] == uid
     assert row["full_name"] == "Verified SVNIT Student"
-    assert row["role"] == "author"
+    assert row["role"] == "viewer"
     assert row["is_verified"] == 1
 
 
@@ -129,7 +133,7 @@ def test_verified_institutional_session_auto_provisions_without_prior_registrati
     assert session.status_code == 200
     assert session.json()["authenticated"] is True
     assert session.json()["user"]["email"] == email
-    assert session.json()["user"]["role"] == "author"
+    assert session.json()["user"]["role"] == "viewer"
     assert session.json()["user"]["is_verified"] == 1
     assert session.json()["user"]["status"] == "active"
 
@@ -139,26 +143,84 @@ def test_verified_institutional_session_auto_provisions_without_prior_registrati
     assert me.json()["user"]["email"] == email
 
 
-def test_public_registration_is_author_only_and_rejects_role_escalation():
+def test_public_viewer_signup_and_elevated_role_requests_do_not_grant_privilege():
     email = f"viewer_{uuid.uuid4().hex[:6]}@aid.svnit.ac.in"
     uid = f"uid-{uuid.uuid4().hex}"
     response = client.post("/api/auth/register", headers=firebase_headers(email, uid), json={
         "requested_role": "viewer", "full_name": "SVNIT Viewer", "email": email,
     })
-    assert response.status_code == 403
+    assert response.status_code == 200
+    assert response.json()["role"] == "viewer"
+    assert response.json()["role_request_submitted"] is False
+    elevated_email = f"request_{uuid.uuid4().hex[:6]}@aid.svnit.ac.in"
+    elevated_uid = f"uid-{uuid.uuid4().hex}"
+    elevated = client.post("/api/auth/register", headers=firebase_headers(elevated_email, elevated_uid), json={
+        "requested_role": "reviewer", "full_name": "Role Requester", "email": elevated_email,
+    })
+    assert elevated.status_code == 200
+    assert elevated.json()["role"] == "viewer"
+    assert elevated.json()["role_request_submitted"] is True
+    assert client.post("/api/auth/session", headers=firebase_headers(elevated_email, elevated_uid, True)).json()["user"]["role"] == "viewer"
+    from app.db.database import get_db
+    with get_db() as conn:
+        req = conn.execute("SELECT requested_role,status FROM user_role_requests WHERE user_id=?", (elevated_uid,)).fetchone()
+    assert tuple(req) == ("reviewer", "pending")
+    admin = helper_login("admin@svnit.acm.org", "Admin@1234")
+    admin_headers = {"Authorization": f"Bearer {admin['access_token']}"}
+    reviewed = client.get("/api/auth/role-requests", headers=admin_headers)
+    assert any(row["user_id"] == elevated_uid and row["status"] == "pending" for row in reviewed.json()["requests"])
+    elevated_request = next(row for row in reviewed.json()["requests"] if row["user_id"] == elevated_uid)
+    approval = client.post(f"/api/auth/role-requests/{elevated_request['id']}/review", headers=admin_headers, json={
+        "decision": "approve", "confirm_privileged_change": True,
+    })
+    assert approval.status_code == 200
+    promoted_session = client.post("/api/auth/session", headers=firebase_headers(elevated_email, elevated_uid, True))
+    assert promoted_session.json()["user"]["role"] == "reviewer"
+    assert client.post("/api/auth/users/invitations", headers=admin_headers, json={
+        "email": f"another_{uuid.uuid4().hex[:6]}@aid.svnit.ac.in",
+        "role": "admin", "confirm_privileged": True,
+    }).status_code == 422
+    assert client.put(f"/api/auth/users/{elevated_uid}/role", headers=admin_headers, json={
+        "role": "admin", "confirm_privileged_change": True,
+    }).status_code == 403
+    assert client.post("/api/auth/register", headers=firebase_headers("inviteadmin@aid.svnit.ac.in", f"uid-{uuid.uuid4().hex}"), json={
+        "requested_role": "admin", "full_name": "Self Admin", "email": "inviteadmin@aid.svnit.ac.in",
+    }).status_code == 422
     assert client.post("/api/auth/register", headers=firebase_headers("elevate@aid.svnit.ac.in", "x"), json={
         "role": "admin", "full_name": "Self Admin", "email": "elevate@aid.svnit.ac.in",
-    }).status_code == 422
+    }).status_code in {403, 422}
 
 
-def test_public_role_availability_respects_backend_configuration(monkeypatch):
-    import app.api.auth as auth_api
-    monkeypatch.setattr(auth_api, "PUBLIC_ROLES", {"author"})
+def test_viewer_role_is_the_only_immediate_public_signup_role():
     email = f"viewer_disabled_{uuid.uuid4().hex[:6]}@aid.svnit.ac.in"
     response = client.post("/api/auth/register", headers=firebase_headers(email, f"uid-{uuid.uuid4().hex}"), json={
         "requested_role": "viewer", "full_name": "Viewer Disabled", "email": email,
     })
-    assert response.status_code == 403
+    assert response.status_code == 200 and response.json()["role"] == "viewer"
+
+
+def test_role_request_schema_upgrade_preserves_existing_pending_requests(monkeypatch, tmp_path):
+    db_path = tmp_path / "existing-smartdocs.db"
+    with sqlite3.connect(db_path) as conn:
+        conn.execute("""
+            CREATE TABLE user_role_requests (
+                id TEXT PRIMARY KEY, user_id TEXT NOT NULL, email TEXT NOT NULL,
+                requested_role TEXT NOT NULL CHECK(requested_role IN ('reviewer','approver','template_admin')),
+                status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending','approved','rejected')),
+                reviewed_by TEXT, reviewed_at TEXT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        conn.execute("INSERT INTO user_role_requests (id,user_id,email,requested_role) VALUES ('old-1','user-1','u1@aid.svnit.ac.in','reviewer')")
+
+    monkeypatch.setenv("SMARTDOCS_DATABASE_PATH", str(db_path))
+    from app.db.database import get_db, init_db
+    init_db()
+    with get_db() as conn:
+        old = conn.execute("SELECT requested_role,status FROM user_role_requests WHERE id='old-1'").fetchone()
+        conn.execute("INSERT INTO user_role_requests (id,user_id,email,requested_role) VALUES ('new-1','user-2','u2@aid.svnit.ac.in','author')")
+        new = conn.execute("SELECT requested_role,status FROM user_role_requests WHERE id='new-1'").fetchone()
+    assert tuple(old) == ("reviewer", "pending")
+    assert tuple(new) == ("author", "pending")
 
 def test_public_registration_rejects_privileged_role_and_noninstitutional_domain():
     email = f"rolecheck_{uuid.uuid4().hex[:6]}@svnit.ac.in"
@@ -171,6 +233,26 @@ def test_public_registration_rejects_privileged_role_and_noninstitutional_domain
         "requested_role": "author", "full_name": "External", "email": "student@example.com",
     })
     assert external.status_code == 422
+
+
+def test_only_configured_bootstrap_identity_can_use_system_admin_access(monkeypatch):
+    from app.db.database import get_db
+    monkeypatch.setenv("ADMIN_BOOTSTRAP_EMAIL", "owner@aid.svnit.ac.in")
+    monkeypatch.setenv("ADMIN_EMAILS", "other-admin@aid.svnit.ac.in")
+    email = f"legacy_admin_{uuid.uuid4().hex[:6]}@aid.svnit.ac.in"
+    uid = f"uid-{uuid.uuid4().hex}"
+    with get_db() as conn:
+        conn.execute(
+            "INSERT INTO users (id,email,hashed_password,full_name,role,status,is_active,is_verified,firebase_uid) VALUES (?,?,?,?,?,'active',1,1,?)",
+            (uid, email, "firebase-managed", "Legacy Admin", "admin", uid),
+        )
+    session = client.post("/api/auth/session", headers=firebase_headers(email, uid, True))
+    assert session.status_code == 200
+    assert session.json()["user"]["role"] == "viewer"
+    assert client.get("/api/auth/me", headers=firebase_headers(email, uid, True)).json()["user"]["role"] == "viewer"
+    from app.core.security import is_allowlisted_admin
+    assert is_allowlisted_admin("owner@aid.svnit.ac.in") is True
+    assert is_allowlisted_admin("other-admin@aid.svnit.ac.in") is False
 
 
 def test_invitation_expiry_and_revocation(monkeypatch):
@@ -195,7 +277,7 @@ def test_authorized_admin_can_approve_role_request_with_audit_log():
     email = f"requester_{uuid.uuid4().hex[:6]}@aid.svnit.ac.in"
     uid = f"uid-{uuid.uuid4().hex}"
     assert client.post("/api/auth/register", headers=firebase_headers(email, uid), json={
-        "requested_role": "author", "full_name": "Role Requester", "email": email,
+        "requested_role": "viewer", "full_name": "Role Requester", "email": email,
     }).status_code == 200
     user_headers = firebase_headers(email, uid, True)
     assert client.post("/api/auth/session", headers=user_headers).status_code == 200

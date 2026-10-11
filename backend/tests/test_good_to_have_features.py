@@ -24,6 +24,11 @@ from app.core.security import create_access_token
 
 client = TestClient(app, headers={"Authorization": "Bearer test-firebase:usr-author-01:author@svnit.acm.org:1"})
 
+
+@pytest.fixture(autouse=True)
+def configured_test_admin(monkeypatch):
+    monkeypatch.setenv("ADMIN_BOOTSTRAP_EMAIL", "admin@svnit.acm.org")
+
 # Helper tokens for testing roles
 def get_auth_header(role="author", user_id="usr-author-01", name="Test User"):
     from app.db.database import get_db
@@ -389,7 +394,7 @@ def test_rbac_register_login_and_role_protection():
     assert blocked.status_code == 403
     verified = client.post("/api/auth/session", headers={"Authorization": f"Bearer test-firebase:{uid}:{email}:1"})
     assert verified.status_code == 200
-    assert verified.json()["user"]["role"] == "author"
+    assert verified.json()["user"]["role"] == "viewer"
 
 def test_google_integration_status_and_mock_export():
     # 1. Status check

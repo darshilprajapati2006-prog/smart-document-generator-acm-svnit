@@ -30,7 +30,10 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 
 EMAIL_PATTERN = re.compile(r"^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$")
 VALID_ROLES = ["viewer", "author", "reviewer", "approver", "template_admin", "admin"]
-PUBLIC_ROLES = {r.strip().lower() for r in os.getenv("PUBLIC_REGISTRATION_ROLES", "author").split(",") if r.strip()} & {"author"}
+# Every student may create a read-only Viewer account. Elevated roles are
+# requested at signup and remain Viewer until an administrator approves them.
+PUBLIC_ROLES = {"viewer"}
+REGISTRABLE_ROLES = PUBLIC_ROLES | {"author", "reviewer", "approver", "template_admin"}
 
 def validate_password_policy(password: str) -> None:
     """Enforces appropriate institutional password policy."""
@@ -97,7 +100,7 @@ class UserRegisterRequest(BaseModel):
     @field_validator("requested_role")
     @classmethod
     def validate_public_role(cls, v):
-        if v is not None and v not in {"author", "viewer"}:
+        if v is not None and v not in {"author", "viewer", "reviewer", "approver", "template_admin"}:
             raise ValueError("Please choose an available registration role.")
         return v
 
@@ -131,6 +134,8 @@ class CreateInvitationRequest(BaseModel):
     def validate_role(cls, v):
         if v not in VALID_ROLES:
             raise ValueError(f"Invalid role '{v}'. Allowed roles: {VALID_ROLES}")
+        if v == "admin":
+            raise ValueError("System Admin access is reserved for the configured one-time bootstrap account.")
         return v
 
 
@@ -140,7 +145,7 @@ class RoleRequestBody(BaseModel):
     @field_validator("requested_role")
     @classmethod
     def validate_requested_role(cls, value):
-        if value not in {"reviewer", "approver", "template_admin"}:
+        if value not in {"author", "reviewer", "approver", "template_admin"}:
             raise ValueError("Role request is not eligible for approval.")
         return value
 
@@ -220,10 +225,15 @@ def register_user(request: UserRegisterRequest, authorization: Optional[str] = H
         if datetime.fromisoformat(invitation["expires_at"]) <= now:
             raise HTTPException(status_code=400, detail="Invitation has expired.")
         assigned_role = invitation["role"]
+        if assigned_role == "admin":
+            raise HTTPException(status_code=403, detail="System Admin access is reserved for the configured one-time bootstrap account.")
     else:
-        if not request.requested_role or request.requested_role not in PUBLIC_ROLES:
-            raise HTTPException(status_code=403, detail="Public registration is not enabled for this role. Invitation required.")
-        assigned_role = request.requested_role
+        if not request.requested_role or request.requested_role not in REGISTRABLE_ROLES:
+            raise HTTPException(status_code=403, detail="System Admin access is not available through public registration.")
+        # Public signups always start with the least-privileged role. The
+        # requested role is stored separately and cannot grant access until
+        # an administrator approves it.
+        assigned_role = request.requested_role if request.requested_role in PUBLIC_ROLES else "viewer"
 
     with get_db() as conn:
         conn.execute("BEGIN IMMEDIATE")
@@ -243,11 +253,28 @@ def register_user(request: UserRegisterRequest, authorization: Optional[str] = H
                 conn.execute("UPDATE users SET firebase_uid = ?, role = ? WHERE id = ?", (claims["uid"], assigned_role, existing["id"]))
             else:
                 conn.execute("UPDATE users SET firebase_uid = ? WHERE id = ?", (claims["uid"], existing["id"]))
+            user_id = existing["id"]
         else:
+            user_id = claims["uid"]
             conn.execute(
                 "INSERT INTO users (id,email,hashed_password,full_name,role,status,is_active,is_verified,firebase_uid) VALUES (?,?,?,?,?,'pending_verification',1,0,?)",
-                (claims["uid"], email, "firebase-managed", request.full_name.strip(), assigned_role, claims["uid"]),
+                (user_id, email, "firebase-managed", request.full_name.strip(), assigned_role, claims["uid"]),
             )
+        role_request_submitted = bool(not invitation and request.requested_role != "viewer")
+        if role_request_submitted:
+            pending_request = conn.execute(
+                "SELECT id FROM user_role_requests WHERE user_id=? AND status='pending'",
+                (user_id,),
+            ).fetchone()
+            if not pending_request:
+                request_id = str(uuid.uuid4())
+                conn.execute(
+                    "INSERT INTO user_role_requests(id,user_id,email,requested_role) VALUES(?,?,?,?)",
+                    (request_id, user_id, email, request.requested_role),
+                )
+                record_audit_log(conn, action="role_requested", actor_id=user_id,
+                                 actor_email=email, target_user_id=user_id,
+                                 details={"requested_role": request.requested_role})
         if invitation:
             used = conn.execute(
                 "UPDATE user_invitations SET used_at = ? WHERE id = ? AND used_at IS NULL AND revoked_at IS NULL AND expires_at > ?",
@@ -255,7 +282,10 @@ def register_user(request: UserRegisterRequest, authorization: Optional[str] = H
             )
             if used.rowcount != 1:
                 raise HTTPException(status_code=400, detail="Invitation is expired or has already been used.")
-    return {"success": True, "role": assigned_role, "requires_email_verification": not bool(claims.get("email_verified")), "message": "Account created. Check your inbox for the verification link."}
+    return {"success": True, "role": assigned_role, "role_request_submitted": role_request_submitted,
+            "requested_role": request.requested_role if role_request_submitted else None,
+            "requires_email_verification": not bool(claims.get("email_verified")),
+            "message": "Account created. Check your inbox for the verification link."}
 
 
 @router.post("/invitations/validate")
@@ -268,7 +298,7 @@ def validate_invitation(req: InvitationTokenRequest):
             "SELECT email, role, expires_at FROM user_invitations WHERE token_hash = ? AND used_at IS NULL AND revoked_at IS NULL",
             (token_hash,),
         ).fetchone()
-    if not invitation or datetime.fromisoformat(invitation["expires_at"]) <= now:
+    if not invitation or invitation["role"] == "admin" or datetime.fromisoformat(invitation["expires_at"]) <= now:
         raise HTTPException(status_code=404, detail="Invitation is invalid or expired.")
     return {"email": invitation["email"], "role": invitation["role"], "expires_at": invitation["expires_at"]}
 
@@ -351,7 +381,7 @@ def create_firebase_session(authorization: Optional[str] = Header(None)):
             elif role_req and role_req["status"] == "approved":
                 user_role = role_req["requested_role"]
             else:
-                user_role = "author"
+                user_role = "viewer"
             
             user_id = claims["uid"]
             conn.execute(
@@ -375,7 +405,7 @@ def create_firebase_session(authorization: Optional[str] = Header(None)):
                 user_role = role_req["requested_role"]
                 conn.execute("UPDATE users SET role = ?, firebase_uid = ?, is_verified = 1, status = 'active' WHERE id = ?", (user_role, claims["uid"], row["id"]))
             else:
-                user_role = row["role"]
+                user_role = "viewer" if row["role"] == "admin" else row["role"]
                 conn.execute("UPDATE users SET firebase_uid = ?, is_verified = 1, status = 'active' WHERE id = ?", (claims["uid"], row["id"]))
 
         return {"authenticated": True, "user": {"id": row["id"], "email": row["email"], "full_name": row["full_name"], "role": user_role, "status": "active", "is_active": 1, "is_verified": 1}}
@@ -621,6 +651,8 @@ def admin_update_user_role(
     """
     System Admin changes another user's database-authoritative role.
     """
+    if req.role == "admin":
+        raise HTTPException(status_code=403, detail="System Admin access is reserved for the configured one-time bootstrap account.")
     with get_db() as conn:
         target_user = conn.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
         if not target_user:

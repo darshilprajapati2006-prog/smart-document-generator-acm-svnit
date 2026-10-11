@@ -14,7 +14,6 @@ import { isApprovedInstitutionalEmail } from "../utils/institutionalEmail";
 
 export default function LoginPage({ onLoginSuccess }) {
   const invitationToken = new URLSearchParams(window.location.hash.slice(1)).get("invite") || "";
-  const publicRoles = ["author", "viewer", "reviewer", "approver", "template_admin", "admin"];
   const [invitation, setInvitation] = useState(null);
   const [view, setView] = useState(invitationToken ? "signup" : "signin");
   // Views: sign in, signup, verified-account setup, verification notice, and password recovery.
@@ -26,13 +25,14 @@ export default function LoginPage({ onLoginSuccess }) {
 
   // Sign Up State
   const [fullName, setFullName] = useState("");
-  const [registerRole, setRegisterRole] = useState("author");
+  const [registerRole, setRegisterRole] = useState("viewer");
   const [registerEmail, setRegisterEmail] = useState("");
   const [registerPassword, setRegisterPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [showRegisterPassword, setShowRegisterPassword] = useState(false);
 
   const [activeEmail, setActiveEmail] = useState("");
+  const [verificationLinkSent, setVerificationLinkSent] = useState(false);
 
   // UI Feedback
   const [loading, setLoading] = useState(false);
@@ -105,6 +105,7 @@ export default function LoginPage({ onLoginSuccess }) {
       if (err.code === "auth/email-not-verified") {
         setErrorMessage(err.message || "Verify your email using the link we sent before signing in.");
         setActiveEmail(loginEmail.trim());
+        setVerificationLinkSent(false);
         setView("verify_email");
       } else if (err.code === "smartdocs/profile-not-found") {
         isAutoCompleting = true;
@@ -197,14 +198,27 @@ export default function LoginPage({ onLoginSuccess }) {
 
       if (data && data.success) {
         setActiveEmail(registerEmail.trim());
+        setVerificationLinkSent(Boolean(data.verification_email_sent));
         if (data.role_request_submitted) {
           setSuccessMessage(
-            `Account registered! An access request for '${registerRole.replace("_", " ").toUpperCase()}' has been sent to the System Administrator for approval in User Management. Please open the verification link sent to your inbox.`
+            data.requires_email_verification
+              ? `Account registered! Your ${registerRole.replace("_", " ").toUpperCase()} access request is in the System Admin's User Management queue. Verify your email using the link sent to your inbox; until approval, your access is Viewer.`
+              : `Your ${registerRole.replace("_", " ").toUpperCase()} access request is in the System Admin's User Management queue. Sign in with Viewer access while it awaits approval.`
           );
         } else {
-          setSuccessMessage("Verification link sent. Check your inbox.");
+          setSuccessMessage(data.requires_email_verification
+            ? "Verification link sent. Check your inbox and spam folder."
+            : "Your email is already verified. Sign in to continue with Viewer access.");
         }
-        setView("verify_email");
+        setErrorMessage("");
+        if (data.requires_email_verification) {
+          setView("verify_email");
+        } else {
+          setLoginEmail(registerEmail.trim());
+          setLoginPassword("");
+          await signOut(firebaseAuth);
+          setView("signin");
+        }
       } else {
         setErrorMessage("We couldn't start registration. Please try again.");
       }
@@ -216,8 +230,9 @@ export default function LoginPage({ onLoginSuccess }) {
         return;
       }
       setErrorMessage(err.message || "Registration failed. Please check your details.");
-      if (firebaseAuth.currentUser && !firebaseAuth.currentUser.emailVerified) {
+      if (err.code?.startsWith("auth/") && firebaseAuth.currentUser && !firebaseAuth.currentUser.emailVerified) {
         setActiveEmail(registerEmail.trim());
+        setVerificationLinkSent(false);
         setView("verify_email");
       }
     } finally {
@@ -263,6 +278,7 @@ export default function LoginPage({ onLoginSuccess }) {
     try {
       if (!firebaseAuth.currentUser) throw new Error("Create your account again to request a new verification link.");
       await sendEmailVerification(firebaseAuth.currentUser, { url: window.location.origin });
+      setVerificationLinkSent(true);
       setSuccessMessage("A new verification link has been sent.");
     } catch (err) {
       setErrorMessage(err.message || "We couldn't send a verification link. Try again later.");
@@ -539,7 +555,7 @@ export default function LoginPage({ onLoginSuccess }) {
           <form onSubmit={handleCompleteExistingAccount} className="auth-form">
             <h3 style={{ color: "#fff", margin: "0 0 10px" }}>Finish SmartDocs setup</h3>
             <p style={{ color: "#cbd5e1", lineHeight: 1.6, margin: "0 0 18px" }}>
-              Your email is verified with Firebase, but this email does not have a SmartDocs profile yet. Confirm your name to create the standard Author profile for <strong>{activeEmail}</strong> and continue.
+              Your email is verified with Firebase, but this email does not have a SmartDocs profile yet. Confirm your name to create a read-only Viewer profile for <strong>{activeEmail}</strong> and continue.
             </p>
             <label htmlFor="profile-full-name" style={{ display: "block", marginBottom: 6, color: "#cbd5e1", fontSize: "0.82rem", fontWeight: 600 }}>
               Full Name
@@ -597,12 +613,11 @@ export default function LoginPage({ onLoginSuccess }) {
                   fontSize: ".9rem",
                 }}
               >
-                <option value="author">Author (Create & generate documents)</option>
                 <option value="viewer">Viewer (Read-only access)</option>
+                <option value="author">Author (Create & generate documents)</option>
                 <option value="reviewer">Reviewer (Review submitted documents)</option>
                 <option value="approver">Approver (Institutional approval authority)</option>
                 <option value="template_admin">Template Admin (Manage document templates)</option>
-                <option value="admin">System Admin (Full system administration)</option>
               </select>
               <small style={{ display: "block", marginTop: 6, color: "#94a3b8", fontSize: "0.8rem", lineHeight: 1.4 }}>
                 {invitationToken ? (
@@ -612,9 +627,7 @@ export default function LoginPage({ onLoginSuccess }) {
                 ) : registerRole === "viewer" ? (
                   "✓ Instant access with institutional SVNIT email verification (Read-only access)."
                 ) : registerRole === "author" ? (
-                  "✓ Instant access with institutional SVNIT email verification (Create & generate documents)."
-                ) : registerRole === "admin" ? (
-                  "🛡️ System Admin (Pre-authorized admin accounts active immediately; other accounts route access requests to System Admin for approval)."
+                  "⏳ Sign up with your college ID; Author access starts after System Admin approval. Until then, your account has read-only Viewer access."
                 ) : (
                   "⏳ Sign up with your college ID; an access request for this role will be routed to the System Admin for approval in User Management."
                 )}
@@ -837,8 +850,9 @@ export default function LoginPage({ onLoginSuccess }) {
               Check your inbox
             </h3>
             <p style={{ color: "#cbd5e1", lineHeight: 1.6 }}>
-              We sent a verification link to <strong>{activeEmail}</strong>.
-              Open that link, then return here to sign in.
+              {verificationLinkSent
+                ? <>We sent a verification link to <strong>{activeEmail}</strong>. Open that link, then return here to sign in.</>
+                : <>Firebase has not confirmed that a verification link was sent to <strong>{activeEmail}</strong>. Use “Resend verification link” below, then check your inbox and spam folder.</>}
             </p>
             {errorMessage && (
               <p role="alert" style={{ color: "#fca5a5" }}>

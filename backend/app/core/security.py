@@ -114,20 +114,12 @@ def sign_data_payload(data: Dict[str, Any], signer_id: str) -> str:
     return hmac.new(SECRET_KEY.encode('utf-8'), to_sign, hashlib.sha256).hexdigest()
 
 def is_allowlisted_admin(email: Optional[str]) -> bool:
-    """Returns True if the email belongs to the institutional administrator allowlist."""
+    """Only the configured one-time bootstrap identity can hold System Admin access."""
     if not email:
         return False
     email_clean = email.strip().lower()
-    bootstrap_email = os.getenv("ADMIN_BOOTSTRAP_EMAIL", "admin@svnit.acm.org").strip().lower()
-    allowlist = {
-        "admin@svnit.acm.org",
-        "i25ai007@aid.svnit.ac.in",
-        "ddprajapati916@gmail.com",
-        bootstrap_email
-    }
-    custom_admins = {e.strip().lower() for e in os.getenv("ADMIN_EMAILS", "").split(",") if e.strip()}
-    allowlist.update(custom_admins)
-    return email_clean in allowlist
+    bootstrap_email = os.getenv("ADMIN_BOOTSTRAP_EMAIL", "").strip().lower()
+    return bool(bootstrap_email) and email_clean == bootstrap_email
 
 def get_current_user(credentials: Optional[HTTPAuthorizationCredentials] = Security(security_bearer)) -> Optional[Dict[str, Any]]:
     """Validates a Firebase ID token and loads the matching active, verified DB user."""
@@ -165,7 +157,7 @@ def get_current_user(credentials: Optional[HTTPAuthorizationCredentials] = Secur
                 except Exception:
                     pass
             else:
-                user["role"] = user_row["role"]
+                user["role"] = "viewer" if user_row["role"] == "admin" else user_row["role"]
                 user["status"] = user_row["status"]
                 user["is_active"] = user_row["is_active"]
                 user["is_verified"] = user_row["is_verified"] if "is_verified" in user_row.keys() else 1
@@ -210,7 +202,7 @@ def require_authenticated_user(credentials: Optional[HTTPAuthorizationCredential
                 conn.execute("UPDATE users SET role = 'admin', status = 'active', is_active = 1, is_verified = 1 WHERE id = ?", (user_row["id"],))
             user_role = "admin"
         else:
-            user_role = user_row["role"]
+            user_role = "viewer" if user_row["role"] == "admin" else user_row["role"]
 
         # Keep authenticated context strictly synchronized with active database record
         user["sub"] = user_row["id"]
