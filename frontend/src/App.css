@@ -2539,9 +2539,14 @@ button:disabled,.primary-btn:disabled,.secondary-btn:disabled { opacity:.5; curs
 input[type="file"]::file-selector-button { min-height:32px; margin-right:10px; padding:0 10px; border:1px solid var(--line); border-radius:6px; color:var(--text-secondary); background:var(--surface-raised); cursor:pointer; }
 
 @media (max-width:760px) {
-  .topbar { grid-template-columns:auto minmax(0,1fr) auto; }
+  .topbar {
+    grid-template-columns:auto minmax(0,1fr);
+    grid-template-rows:auto auto;
+    row-gap:10px;
+    padding-block:10px;
+  }
   .topbar-context { display:none; }
-  .topbar-controls { display:flex; min-width:0; margin-left:0; }
+  .topbar-controls { grid-column:1 / -1; display:flex; width:100%; min-width:0; margin-left:0; justify-content:stretch; }
   .topbar-controls > .account-cluster,
   .topbar-controls > .request-role-action,
   .topbar-controls > .admin-users-action,
@@ -2549,10 +2554,10 @@ input[type="file"]::file-selector-button { min-height:32px; margin-right:10px; p
   .topbar-controls > .health-indicator,
   .topbar-controls > .logout-action,
   .topbar-controls > .verification-badge { display:none; }
-  .mobile-account-menu { position:relative; display:block; margin-left:auto; }
-  .mobile-account-menu > summary { max-width:min(168px,42vw); }
-  .mobile-account-menu .account-name { max-width:64px; font-size:10px; }
-  .mobile-account-menu .role-badge { max-width:68px; font-size:8px; }
+  .mobile-account-menu { position:relative; display:block; width:100%; margin-left:0; }
+  .mobile-account-menu > summary { width:100%; max-width:none; min-height:42px; justify-content:flex-start; }
+  .mobile-account-menu .account-name { max-width:none; flex:1 1 auto; overflow:visible; font-size:11px; text-overflow:clip; }
+  .mobile-account-menu .role-badge { max-width:none; overflow:visible; font-size:8px; text-overflow:clip; }
   .institution-mark { gap:6px; }
   .institution-mark img { width:30px; height:30px; }
   .mobile-account-popover { right:0; }
@@ -2576,10 +2581,10 @@ input[type="file"]::file-selector-button { min-height:32px; margin-right:10px; p
   .mobile-menu-button { width:36px; height:36px; padding:8px; }
   .institution-mark img { width:26px; height:26px; }
   .institution-mark span { font-size:8px; }
-  .mobile-account-menu > summary { max-width:144px; padding-inline:6px; gap:5px; }
+  .mobile-account-menu > summary { width:100%; max-width:none; padding-inline:8px; gap:7px; }
   .mobile-account-menu .account-avatar { width:23px; height:23px; flex-basis:23px; }
-  .mobile-account-menu .account-name { max-width:48px; }
-  .mobile-account-menu .role-badge { max-width:56px; padding-inline:5px; }
+  .mobile-account-menu .account-name { max-width:none; font-size:10px; }
+  .mobile-account-menu .role-badge { max-width:none; padding-inline:6px; font-size:8px; }
   .page-panel { padding:14px; }
 }
 
