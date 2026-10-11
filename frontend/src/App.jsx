@@ -87,6 +87,14 @@ function formatReceiptDate(value) {
   return match ? `${match[3]}/${match[2]}/${match[1]}` : value;
 }
 
+function withTimeout(promise, timeoutMs, message) {
+  let timeoutId;
+  const timeout = new Promise((_, reject) => {
+    timeoutId = window.setTimeout(() => reject(new Error(message)), timeoutMs);
+  });
+  return Promise.race([promise, timeout]).finally(() => window.clearTimeout(timeoutId));
+}
+
 // Optional Mock/Demo Data (Used strictly as reference; never auto-populated into actual initial form state)
 const mockDemoData = {
   exec_meet: {
@@ -410,13 +418,18 @@ export default function App() {
 
   // Validate session and check backend health on mount
   useEffect(() => {
+    let active = true;
     async function initAuthAndHealth() {
-      const isHealthy = await checkBackendHealth();
-      setApiOnline(isHealthy);
-      setApiHealthStatus(isHealthy ? "connected" : "offline");
-
+      let healthResolved = false;
       try {
-        const profile = await fetchCurrentUserProfile();
+        const isHealthy = await withTimeout(checkBackendHealth(), 12000, "Backend health check timed out");
+        if (!active) return;
+        healthResolved = true;
+        setApiOnline(isHealthy);
+        setApiHealthStatus(isHealthy ? "connected" : "offline");
+
+        const profile = await withTimeout(fetchCurrentUserProfile(), 25000, "Session restoration timed out");
+        if (!active) return;
         if (profile?.authenticated && profile.user) {
           const userObj = { ...profile.user };
           if (userObj.email && ADMIN_EMAILS.includes(userObj.email.toLowerCase())) {
@@ -430,20 +443,30 @@ export default function App() {
           localStorage.removeItem("acm_doc_user");
         }
       } catch {
+        if (!active) return;
+        if (!healthResolved) {
+          setApiOnline(false);
+          setApiHealthStatus("offline");
+        }
         setCurrentUser(null);
         localStorage.removeItem("acm_doc_user");
+      } finally {
+        if (active) setAuthChecking(false);
       }
-      setAuthChecking(false);
     }
 
     initAuthAndHealth();
 
     const interval = setInterval(async () => {
       const isHealthy = await checkBackendHealth();
+      if (!active) return;
       setApiOnline(isHealthy);
       setApiHealthStatus(isHealthy ? "connected" : "offline");
     }, 15000);
-    return () => clearInterval(interval);
+    return () => {
+      active = false;
+      clearInterval(interval);
+    };
   }, []);
 
   function handleLoginSuccess(user) {
@@ -1262,13 +1285,46 @@ export default function App() {
 
   if (authChecking) {
     return (
-      <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: "#0f172a", color: "#ffffff", fontFamily: "'Inter', sans-serif" }}>
-        <div style={{ textAlign: "center" }}>
-          <div style={{ fontSize: "2.4rem", marginBottom: "12px" }}>⚡</div>
-          <div style={{ fontSize: "1.2rem", fontWeight: 700 }}>SmartDocs ACM SVNIT</div>
-          <div style={{ fontSize: "0.85rem", color: "#94a3b8", marginTop: "6px" }}>Authenticating secure session...</div>
-        </div>
-      </div>
+      <main className="auth-loading-screen" aria-labelledby="auth-loading-title">
+        <div className="auth-loading-glow auth-loading-glow-blue" aria-hidden="true" />
+        <div className="auth-loading-glow auth-loading-glow-gold" aria-hidden="true" />
+        <section className="auth-loading-content" aria-live="polite" aria-busy="true">
+          <div className="auth-loading-institutions" aria-label="ACM Student Chapter and SVNIT Surat">
+            <div className="auth-loading-logo-tile">
+              <img src="/branding/acm_logo.png" alt="ACM logo" />
+            </div>
+            <span className="auth-loading-cross" aria-hidden="true">×</span>
+            <div className="auth-loading-logo-tile auth-loading-logo-svnit">
+              <img src="/branding/svnit_logo.png" alt="SVNIT logo" />
+            </div>
+          </div>
+
+          <div className="auth-loading-divider" aria-hidden="true"><span /></div>
+
+          <div className="auth-loading-brand">
+            <p className="auth-loading-eyebrow">OFFICIAL DOCUMENT WORKSPACE</p>
+            <h1 id="auth-loading-title">SmartDocs</h1>
+            <p className="auth-loading-institution-name">ACM · SVNIT SURAT</p>
+          </div>
+
+          <div className="auth-loading-indicator" role="status" aria-label="Checking your secure session">
+            <span className="auth-loading-spinner" aria-hidden="true" />
+            <span className="auth-loading-indicator-core" aria-hidden="true">SD</span>
+          </div>
+
+          <p className="auth-loading-status">Checking your secure session</p>
+          <p className="auth-loading-support">Your workspace will open when sign-in is verified.</p>
+
+          <div className="auth-loading-security">
+            <svg viewBox="0 0 20 20" aria-hidden="true" focusable="false">
+              <path d="M10 2.2 16 4.5v4.8c0 3.7-2.5 6.7-6 8.5-3.5-1.8-6-4.8-6-8.5V4.5l6-2.3Z" />
+              <path d="m7.4 9.8 1.7 1.7 3.6-3.7" />
+            </svg>
+            <span>SECURE WORKSPACE</span>
+          </div>
+          <p className="auth-loading-footer">ACM Student Chapter · SVNIT Surat</p>
+        </section>
+      </main>
     );
   }
 
@@ -1374,6 +1430,11 @@ export default function App() {
           <div>
             <strong>ACM Student Chapter</strong>
             <small>SVNIT Surat · Production Ready</small>
+          </div>
+          <div className="developer-credit" aria-label="Designed and developed by Darshil Prajapati, I25AI007">
+            <span className="developer-credit-label">Designed And Developed By :</span>
+            <strong className="developer-credit-name">DARSHIL PRAJAPATI</strong>
+            <span className="developer-credit-id">I25AI007</span>
           </div>
         </div>
       </aside>

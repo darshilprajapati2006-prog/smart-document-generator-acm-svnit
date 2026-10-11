@@ -138,6 +138,7 @@
 
 .sidebar-footer {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 10px;
   margin-top: auto;
@@ -166,6 +167,7 @@
   font-size: 10px;
   color: #9ca3af;
 }
+.sidebar-footer .developer-credit { flex:1 0 100%; }
 
 .main-content {
   flex: 1;
@@ -1877,6 +1879,57 @@ button:disabled,.primary-btn:disabled,.secondary-btn:disabled { opacity:.5; curs
 .clauses-modal-card button.primary-button:disabled { color:var(--muted)!important; background:var(--surface-soft)!important; }
 .clauses-modal-card button.secondary-button { border-color:var(--line)!important; color:var(--text-secondary)!important; background:var(--surface-soft)!important; }
 
+/* Branded, lightweight authentication restoration screen. */
+.auth-loading-screen {
+  position:relative; isolation:isolate; min-height:100vh; min-height:100svh; overflow:hidden;
+  display:grid; place-items:center; padding:28px 18px; color:var(--text);
+  background:radial-gradient(ellipse at 50% 42%,rgba(48,68,117,.16),transparent 46%),var(--canvas);
+}
+.auth-loading-screen::before {
+  position:absolute; z-index:-1; inset:0; content:""; opacity:.22; pointer-events:none;
+  background-image:linear-gradient(rgba(220,214,239,.025) 1px,transparent 1px),linear-gradient(90deg,rgba(220,214,239,.025) 1px,transparent 1px);
+  background-size:48px 48px; mask-image:linear-gradient(transparent,#000 24%,#000 76%,transparent);
+}
+.auth-loading-glow { position:absolute; z-index:-1; width:340px; height:340px; border-radius:50%; filter:blur(90px); opacity:.14; pointer-events:none; }
+.auth-loading-glow-blue { top:10%; left:calc(50% - 330px); background:#5276d8; }
+.auth-loading-glow-gold { right:calc(50% - 330px); bottom:8%; width:260px; height:260px; background:#bc9851; opacity:.08; }
+.auth-loading-content {
+  width:min(100%,440px); padding:36px 38px 30px; display:flex; flex-direction:column; align-items:center;
+  border:1px solid var(--line); border-radius:24px; text-align:center;
+  background:linear-gradient(155deg,rgba(32,32,47,.96),rgba(21,21,32,.97));
+  box-shadow:0 28px 80px rgba(0,0,0,.34),inset 0 1px rgba(255,255,255,.035);
+  animation:authLoadingEnter .55s cubic-bezier(.2,.7,.2,1) both;
+}
+.auth-loading-institutions { display:flex; align-items:center; justify-content:center; gap:17px; }
+.auth-loading-logo-tile { width:66px; height:66px; display:grid; place-items:center; overflow:hidden; border:1px solid rgba(220,214,239,.16); border-radius:18px; background:#fff; box-shadow:0 8px 24px rgba(0,0,0,.2); }
+.auth-loading-logo-tile img { display:block; width:100%; height:100%; object-fit:contain; }
+.auth-loading-logo-svnit img { width:90%; height:90%; }
+.auth-loading-cross { color:var(--gold); font-family:inherit; font-size:17px; font-weight:500; }
+.auth-loading-divider { width:100%; height:1px; margin:25px 0 22px; background:linear-gradient(90deg,transparent,var(--line),transparent); }
+.auth-loading-divider span { display:block; width:38px; height:2px; margin:auto; transform:translateY(-.5px); background:var(--gold); opacity:.78; }
+.auth-loading-eyebrow { margin:0 0 7px; color:var(--gold); font-size:9px; font-weight:750; letter-spacing:.18em; }
+.auth-loading-brand h1 { margin:0; color:var(--text); font-family:"Space Grotesk","DM Sans",sans-serif; font-size:29px; font-weight:700; letter-spacing:-.045em; }
+.auth-loading-institution-name { margin:4px 0 0; color:var(--muted); font-size:11px; font-weight:650; letter-spacing:.15em; }
+.auth-loading-indicator { position:relative; width:54px; height:54px; margin-top:27px; display:grid; place-items:center; }
+.auth-loading-spinner { position:absolute; inset:0; border:2px solid rgba(220,214,239,.12); border-top-color:var(--violet); border-right-color:rgba(179,155,255,.48); border-radius:50%; animation:authLoadingSpin 1s linear infinite; }
+.auth-loading-indicator-core { color:var(--violet); font-size:10px; font-weight:800; letter-spacing:-.04em; }
+.auth-loading-status { margin:13px 0 0; color:var(--text-secondary); font-size:14px; font-weight:650; }
+.auth-loading-support { margin:6px 0 0; color:var(--muted); font-size:11px; line-height:1.55; }
+.auth-loading-security { margin-top:25px; padding:7px 11px; display:flex; align-items:center; gap:7px; border:1px solid rgba(95,201,147,.18); border-radius:999px; color:#a6e6c3; background:rgba(95,201,147,.06); font-size:8px; font-weight:750; letter-spacing:.12em; }
+.auth-loading-security svg { width:13px; height:13px; fill:none; stroke:currentColor; stroke-width:1.5; stroke-linecap:round; stroke-linejoin:round; }
+.auth-loading-footer { margin:14px 0 0; color:var(--muted); font-size:10px; }
+@keyframes authLoadingSpin { to { transform:rotate(360deg); } }
+@keyframes authLoadingEnter { from { opacity:0; transform:translateY(8px) scale(.99); } to { opacity:1; transform:translateY(0) scale(1); } }
+@media (max-width:520px) {
+  .auth-loading-screen { padding:18px 14px; }
+  .auth-loading-content { padding:30px 22px 25px; border-radius:20px; }
+  .auth-loading-logo-tile { width:58px; height:58px; border-radius:15px; }
+  .auth-loading-institutions { gap:14px; }
+  .auth-loading-divider { margin:21px 0 19px; }
+  .auth-loading-brand h1 { font-size:27px; }
+  .auth-loading-glow { width:230px; height:230px; filter:blur(72px); }
+}
+
 /* ==========================================================================
    USER & ROLE MANAGEMENT (SYSTEM ADMIN) MODAL DESIGN SYSTEM
    ========================================================================== */
@@ -2540,6 +2593,10 @@ input[type="file"]::file-selector-button { min-height:32px; margin-right:10px; p
 .auth-message-view p { color:#b9b4c1!important; line-height:1.65; }
 .auth-footer { padding:16px 24px 19px; border-top:1px solid var(--line); background:rgba(0,0,0,.14); text-align:center; }
 .auth-footer p { margin:0; color:#8b8696!important; font-size:.72rem!important; }
+.developer-credit { width:fit-content; max-width:100%; min-width:185px; box-sizing:border-box; margin:9px auto 0; padding:8px 12px; display:flex; flex-direction:column; align-items:center; gap:2px; border:1px solid var(--line); border-radius:10px; background:rgba(255,255,255,.025); line-height:1.3; text-align:center; }
+.developer-credit-label { color:var(--muted); font-size:8px; font-weight:550; letter-spacing:.035em; }
+.developer-credit-name { color:var(--text-secondary); font-size:9px; font-weight:750; letter-spacing:.09em; }
+.developer-credit-id { color:var(--gold); font-size:8px; font-weight:750; letter-spacing:.12em; }
 
 @media (max-width:520px) {
  .auth-page { padding:14px; align-items:start; }

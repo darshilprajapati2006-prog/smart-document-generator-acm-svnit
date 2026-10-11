@@ -466,22 +466,22 @@ export default function ClausesModal({
               {allVars.length > 0 && (
                 <div
                   style={{
-                    background: "#f8fafc",
-                    border: "1px solid #e2e8f0",
+                    background: "var(--surface-raised)",
+                    border: "1px solid var(--line)",
                     borderRadius: "8px",
                     padding: "12px 14px"
                   }}
                 >
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "8px" }}>
-                    <span style={{ fontSize: "0.8rem", fontWeight: 600, color: "#334155" }}>
+                    <span style={{ fontSize: "0.8rem", fontWeight: 600, color: "var(--text-secondary)" }}>
                       Template Variables ({allVars.length})
                     </span>
                     {missingVars.length > 0 ? (
-                      <span style={{ fontSize: "0.75rem", color: "#b45309", fontWeight: 600 }}>
+                      <span style={{ fontSize: "0.75rem", color: "var(--warning)", fontWeight: 600 }}>
                         ⚠️ {missingVars.length} variable{missingVars.length > 1 ? "s" : ""} pending input
                       </span>
                     ) : (
-                      <span style={{ fontSize: "0.75rem", color: "#16a34a", fontWeight: 600 }}>
+                      <span style={{ fontSize: "0.75rem", color: "var(--success)", fontWeight: 600 }}>
                         ✓ All variables resolved
                       </span>
                     )}
@@ -494,11 +494,12 @@ export default function ClausesModal({
                       return (
                         <div key={v}>
                           <label
+                            className="clause-variable-label"
                             style={{
                               display: "block",
                               fontSize: "0.73rem",
                               fontWeight: 600,
-                              color: isFromForm ? "#0284c7" : "#64748b",
+                              color: isFromForm ? "var(--violet)" : "var(--muted)",
                               marginBottom: "2px"
                             }}
                           >
@@ -514,8 +515,9 @@ export default function ClausesModal({
                               padding: "6px 8px",
                               fontSize: "0.8rem",
                               borderRadius: "5px",
-                              border: isFromForm ? "1px solid #bae6fd" : "1px solid #cbd5e1",
-                              background: "#ffffff"
+                              border: isFromForm ? "1px solid rgba(179, 155, 255, 0.45)" : "1px solid var(--line)",
+                              background: "var(--surface-soft)",
+                              color: "var(--text)"
                             }}
                           />
                         </div>
@@ -528,22 +530,22 @@ export default function ClausesModal({
               {/* Live Preview Box */}
               <div>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "6px" }}>
-                  <label style={{ fontSize: "0.82rem", fontWeight: 600, color: "#334155" }}>
+                  <label style={{ fontSize: "0.82rem", fontWeight: 600, color: "var(--text-secondary)" }}>
                     Interpolated Live Preview:
                   </label>
-                  <span style={{ fontSize: "0.72rem", color: "#64748b" }}>
+                  <span style={{ fontSize: "0.72rem", color: "var(--muted)" }}>
                     Safe regex variable interpolation (no code execution)
                   </span>
                 </div>
                 <div
                   style={{
                     padding: "14px",
-                    background: "#ffffff",
+                    background: "var(--surface-soft)",
                     borderRadius: "8px",
-                    border: "1px solid #cbd5e1",
+                    border: "1px solid var(--line)",
                     fontSize: "0.88rem",
                     lineHeight: "1.6",
-                    color: "#1e293b",
+                    color: "var(--text-secondary)",
                     minHeight: "85px",
                     whiteSpace: "pre-wrap"
                   }}

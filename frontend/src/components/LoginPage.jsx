@@ -1014,6 +1014,11 @@ export default function LoginPage({ onLoginSuccess }) {
           >
             🔒 Secure sign-in · ACM SVNIT
           </p>
+          <div className="developer-credit" aria-label="Designed and developed by Darshil Prajapati, I25AI007">
+            <span className="developer-credit-label">Designed And Developed By :</span>
+            <strong className="developer-credit-name">DARSHIL PRAJAPATI</strong>
+            <span className="developer-credit-id">I25AI007</span>
+          </div>
         </div>
       </div>
     </div>
