@@ -1,61 +1,113 @@
-import { useState, useEffect } from "react";
+import { useEffect, useRef, useState } from "react";
 import { fetchTemplateConfigs, fetchTemplatePreview, updateTemplateConfig } from "../services/documentApi";
+
+const TEMPLATE_OPTIONS = [
+  { id: "exec_meet", label: "Executive Meet Request" },
+  { id: "bill_certificate", label: "Bill Certificate (Recurring)" },
+  { id: "bill_summary", label: "Bill Summary" },
+];
+const EDITOR_ROLES = new Set(["template_admin", "tmpladmin", "admin"]);
+
+function labelForKey(key) {
+  return String(key)
+    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+    .replace(/[_-]+/g, " ")
+    .replace(/\b\w/g, (character) => character.toUpperCase());
+}
 
 export default function TemplateEditorPanel({ currentRole }) {
   const [configs, setConfigs] = useState([]);
   const [selectedTemplate, setSelectedTemplate] = useState("exec_meet");
   const [preview, setPreview] = useState(null);
-  const [loading, setLoading] = useState(false);
+  const [loadingConfigs, setLoadingConfigs] = useState(true);
+  const [loadingPreview, setLoadingPreview] = useState(true);
+  const [saving, setSaving] = useState(false);
   const [feedback, setFeedback] = useState({ type: "", message: "" });
-
-  // Editable fields
   const [displayName, setDisplayName] = useState("");
+  const [sectionOrdering, setSectionOrdering] = useState([]);
+  const [branding, setBranding] = useState({});
+  const previewRequestId = useRef(0);
+  const canEdit = EDITOR_ROLES.has(currentRole);
+  const options = configs.length
+    ? configs.map((config) => {
+      const id = config.template_id || config.document_type;
+      return { id, label: config.display_name || TEMPLATE_OPTIONS.find((option) => option.id === id)?.label || labelForKey(id) };
+    }).filter((option) => option.id)
+    : TEMPLATE_OPTIONS;
+  const activePreview = preview?.template_id === selectedTemplate ? preview : null;
+  const instituteName = branding.institute || branding.org_name || branding.sheet_title || "Sardar Vallabhbhai National Institute of Technology, Surat";
+  const departmentName = branding.department || branding.footer || "";
 
   useEffect(() => {
-    loadConfigs();
+    let active = true;
+    fetchTemplateConfigs()
+      .then((result) => {
+        if (active) setConfigs(Array.isArray(result.configs) ? result.configs : []);
+      })
+      .catch((error) => {
+        if (active) setFeedback({ type: "error", message: error.message || "Could not load template configurations." });
+      })
+      .finally(() => {
+        if (active) setLoadingConfigs(false);
+      });
+    return () => { active = false; };
   }, []);
 
   useEffect(() => {
-    if (selectedTemplate) {
-      loadPreview(selectedTemplate);
-    }
+    let active = true;
+    const requestId = ++previewRequestId.current;
+    fetchTemplatePreview(selectedTemplate)
+      .then((result) => {
+        if (!active || requestId !== previewRequestId.current) return;
+        setPreview(result);
+        setDisplayName(result.display_name || "");
+        setSectionOrdering(Array.isArray(result.section_ordering) ? result.section_ordering : []);
+        setBranding(result.branding && typeof result.branding === "object" ? result.branding : {});
+      })
+      .catch((error) => {
+        if (active && requestId === previewRequestId.current) {
+          setPreview(null);
+          setFeedback({ type: "error", message: error.message || "Could not load this template preview." });
+        }
+      })
+      .finally(() => {
+        if (active && requestId === previewRequestId.current) setLoadingPreview(false);
+      });
+    return () => { active = false; };
   }, [selectedTemplate]);
 
-  async function loadConfigs() {
-    try {
-      const res = await fetchTemplateConfigs();
-      setConfigs(res.configs || []);
-    } catch (err) {
-      setFeedback({ type: "error", message: err.message });
-    }
-  }
-
-  async function loadPreview(tmplId) {
-    setLoading(true);
-    setFeedback({ type: "", message: "" });
-    try {
-      const res = await fetchTemplatePreview(tmplId);
-      setPreview(res);
-      setDisplayName(res.display_name || "");
-    } catch (err) {
-      setFeedback({ type: "error", message: err.message });
-    } finally {
-      setLoading(false);
-    }
+  function moveSection(index, direction) {
+    setSectionOrdering((current) => {
+      const target = index + direction;
+      if (target < 0 || target >= current.length) return current;
+      const next = [...current];
+      [next[index], next[target]] = [next[target], next[index]];
+      return next;
+    });
   }
 
   async function handleSaveConfig() {
-    setLoading(true);
+    if (!canEdit || !activePreview || !displayName.trim()) return;
+    setSaving(true);
+    setFeedback({ type: "", message: "" });
     try {
-      await updateTemplateConfig(selectedTemplate, {
-        display_name: displayName
+      const saved = await updateTemplateConfig(selectedTemplate, {
+        display_name: displayName.trim(),
+        section_ordering: sectionOrdering,
+        branding,
       });
-      setFeedback({ type: "success", message: `Template settings for '${selectedTemplate}' saved successfully.` });
-      loadConfigs();
-    } catch (err) {
-      setFeedback({ type: "error", message: err.message });
+      setDisplayName(saved.display_name || displayName.trim());
+      setSectionOrdering(Array.isArray(saved.section_ordering) ? saved.section_ordering : sectionOrdering);
+      setBranding(saved.branding && typeof saved.branding === "object" ? saved.branding : branding);
+      setPreview((current) => current?.template_id === selectedTemplate ? { ...current, ...saved } : current);
+      setConfigs((current) => current.map((config) => (
+        (config.template_id || config.document_type) === selectedTemplate ? { ...config, ...saved } : config
+      )));
+      setFeedback({ type: "success", message: "Template settings saved." });
+    } catch (error) {
+      setFeedback({ type: "error", message: error.message || "Could not save template settings." });
     } finally {
-      setLoading(false);
+      setSaving(false);
     }
   }
 
@@ -63,113 +115,135 @@ export default function TemplateEditorPanel({ currentRole }) {
     <section className="page-panel template-page">
       <div className="page-panel-heading">
         <div>
-          <h2 style={{ fontSize: "1.3rem", fontWeight: "700", color: "#0f172a", margin: 0 }}>
-            🎨 Template Preview & Configuration Editor (Feature 8)
-          </h2>
-          <p style={{ margin: "4px 0 0 0", color: "#64748b", fontSize: "0.9rem" }}>
-            Preview template layout with isolated sample data and configure display titles, section order, and branding.
-          </p>
+          <h2 className="template-page-title">🎨 Template Preview &amp; Configuration Editor</h2>
+          <p className="template-page-description">Preview sample layouts and configure document titles, section order, and branding.</p>
         </div>
       </div>
 
       {feedback.message && (
-        <div className={`feedback-banner ${feedback.type === "success" ? "feedback-success" : "feedback-error"}`} style={{
-          padding: "10px 14px",
-          background: feedback.type === "success" ? "#f0fdf4" : "#fef2f2",
-          color: feedback.type === "success" ? "#166534" : "#991b1b",
-          borderRadius: "8px",
-          border: `1px solid ${feedback.type === "success" ? "#bbf7d0" : "#fecaca"}`,
-          marginBottom: "1rem",
-          fontSize: "0.9rem"
-        }}>
-          {feedback.type === "success" ? "✔ " : "⚠️ "} {feedback.message}
+        <div className={`template-feedback template-feedback-${feedback.type}`} role={feedback.type === "error" ? "alert" : "status"}>
+          {feedback.type === "success" ? "✓ " : "⚠ "}{feedback.message}
         </div>
       )}
 
-      {/* Template Selectors */}
-      <div className="template-switcher">
-        {(configs.length > 0 ? configs.map((c) => c.document_type) : ["exec_meet", "bill_certificate", "bill_summary"]).map((tId) => (
+      <div className="template-switcher" role="tablist" aria-label="Choose a document template">
+        {options.map((option) => (
           <button
-            key={tId}
+            key={option.id}
             type="button"
-            className={selectedTemplate === tId ? "primary-btn" : "secondary-btn"}
-            onClick={() => setSelectedTemplate(tId)}
-            style={{ padding: "8px 16px", fontSize: "0.9rem" }}
+            role="tab"
+            aria-selected={selectedTemplate === option.id}
+            className={selectedTemplate === option.id ? "primary-btn" : "secondary-btn"}
+            onClick={() => {
+              if (selectedTemplate === option.id) return;
+              setLoadingPreview(true);
+              setFeedback({ type: "", message: "" });
+              setSelectedTemplate(option.id);
+            }}
+            disabled={saving}
           >
-            {tId === "exec_meet" ? "Executive Meet" : tId === "bill_certificate" ? "Bill Certificate" : "Bill Summary"}
+            {option.label}
           </button>
         ))}
       </div>
 
-      {currentRole && !["template_admin", "tmpladmin", "admin"].includes(currentRole) && (
+      {currentRole && !canEdit && (
         <div className="template-access-note">
-          🔒 Read-Only Preview Mode: Role '{currentRole}' cannot modify institutional template configurations. Switch role to 'Template Admin' or 'System Admin' to save changes.
+          🔒 Read-only preview. Template changes require Template Admin or System Admin access.
         </div>
       )}
 
-      {preview && (
+      {loadingConfigs && !configs.length && <p className="template-loading" role="status">Loading template list…</p>}
+      {loadingPreview && !activePreview && <p className="template-loading" role="status">Loading template preview…</p>}
+
+      {activePreview && (
         <div className="template-editor-grid">
-          {/* Settings Panel */}
           <div className="template-settings-card">
-            <h4 style={{ fontSize: "0.95rem", fontWeight: "700", margin: "0 0 10px 0", color: "#1e293b" }}>
-              ⚙️ Template Settings
-            </h4>
-            <div style={{ marginBottom: "12px" }}>
-              <label style={{ fontSize: "0.82rem", fontWeight: "600", color: "#475569" }}>Template Display Name:</label>
+            <h3 className="template-settings-title">⚙️ Template Settings</h3>
+
+            <div className="template-field">
+              <label htmlFor="template-display-name">Template display name</label>
               <input
+                id="template-display-name"
                 type="text"
                 value={displayName}
-                onChange={(e) => setDisplayName(e.target.value)}
-                style={{ width: "100%", padding: "8px", borderRadius: "6px", border: "1px solid #cbd5e1", marginTop: "4px" }}
+                maxLength={120}
+                onChange={(event) => setDisplayName(event.target.value)}
+                disabled={!canEdit || saving}
               />
             </div>
 
-            <div style={{ marginBottom: "12px" }}>
-              <label style={{ fontSize: "0.82rem", fontWeight: "600", color: "#475569" }}>Section Ordering:</label>
-              <div style={{ fontSize: "0.8rem", color: "#64748b", marginTop: "4px" }}>
-                {preview.section_ordering.map((sec, idx) => (
-                  <div key={sec} style={{ padding: "4px 8px", background: "#ffffff", borderRadius: "4px", border: "1px solid #e2e8f0", marginBottom: "4px" }}>
-                    {idx + 1}. {sec}
+            <fieldset className="template-order-fieldset" disabled={!canEdit || saving}>
+              <legend>Section order</legend>
+              {sectionOrdering.length ? (
+                <ol className="template-order-list">
+                  {sectionOrdering.map((section, index) => (
+                    <li className="template-order-item" key={`${section}-${index}`}>
+                      <span className="template-order-index">{index + 1}</span>
+                      <span className="template-order-name">{labelForKey(section)}</span>
+                      <span className="template-order-actions">
+                        <button type="button" aria-label={`Move ${labelForKey(section)} up`} onClick={() => moveSection(index, -1)} disabled={index === 0 || !canEdit || saving}>↑</button>
+                        <button type="button" aria-label={`Move ${labelForKey(section)} down`} onClick={() => moveSection(index, 1)} disabled={index === sectionOrdering.length - 1 || !canEdit || saving}>↓</button>
+                      </span>
+                    </li>
+                  ))}
+                </ol>
+              ) : <p className="template-empty-state">No sections are configured for this template.</p>}
+            </fieldset>
+
+            {Object.keys(branding).length > 0 && (
+              <fieldset className="template-branding-fieldset" disabled={!canEdit || saving}>
+                <legend>Document branding</legend>
+                {Object.entries(branding).map(([key, value]) => (
+                  <div className="template-field" key={key}>
+                    <label htmlFor={`template-branding-${key}`}>{labelForKey(key)}</label>
+                    <input
+                      id={`template-branding-${key}`}
+                      type="text"
+                      value={value == null ? "" : String(value)}
+                      maxLength={240}
+                      onChange={(event) => setBranding((current) => ({ ...current, [key]: event.target.value }))}
+                      disabled={!canEdit || saving}
+                    />
                   </div>
                 ))}
-              </div>
-            </div>
+              </fieldset>
+            )}
 
             <button
               type="button"
-              className="primary-btn"
+              className="primary-btn template-save-button"
               onClick={handleSaveConfig}
-              disabled={loading}
-              style={{ width: "100%", padding: "8px", fontSize: "0.88rem" }}
+              disabled={!canEdit || !activePreview || !displayName.trim() || saving || loadingPreview}
             >
-              {loading ? "Saving..." : "Save Template Settings"}
+              {saving ? "Saving…" : "Save Template Settings"}
             </button>
-            <p style={{ fontSize: "0.75rem", color: "#94a3b8", marginTop: "6px" }}>
-              *Requires Template Administrator or Admin role.
-            </p>
+            <p className="template-permission-hint">Changes are saved to this template configuration.</p>
           </div>
 
-          {/* Sample Preview Display */}
-          <div className="template-preview-paper">
-            <div className="template-preview-warning">
-              ⚠️ {preview.preview_notice}
-            </div>
-
-            <div style={{ borderBottom: "2px solid #0f172a", paddingBottom: "10px", marginBottom: "12px" }}>
-              <h3 style={{ margin: 0, fontSize: "1.1rem", color: "#0f172a" }}>{preview.display_name}</h3>
-              <div style={{ fontSize: "0.82rem", color: "#64748b", marginTop: "2px" }}>
-                {preview.branding?.institute || "Sardar Vallabhbhai National Institute of Technology, Surat"}
-              </div>
-            </div>
-
-            <div style={{ fontSize: "0.88rem" }}>
-              <div style={{ fontWeight: "700", color: "#1e293b", marginBottom: "8px" }}>Sample Data Values:</div>
-              <pre className="template-sample-data">
-                {JSON.stringify(preview.sample_data, null, 2)}
-              </pre>
-            </div>
+          <div className="template-preview-paper" aria-label="Sample document preview">
+            <div className="template-preview-warning">⚠️ {activePreview.preview_notice || "Sample preview only. Do not use as an official document."}</div>
+            <header className="template-preview-header">
+              <h3>{displayName || activePreview.display_name}</h3>
+              <div>{instituteName}</div>
+              {departmentName && <small>{departmentName}</small>}
+            </header>
+            <section className="template-preview-sections" aria-label="Configured section order">
+              <h4>Document section order</h4>
+              <ol>
+                {sectionOrdering.map((section, index) => <li key={`${section}-${index}`}>{labelForKey(section)}</li>)}
+              </ol>
+            </section>
+            <section className="template-sample-section">
+              <h4>Sample data values</h4>
+              <pre className="template-sample-data">{JSON.stringify(activePreview.sample_data || {}, null, 2)}</pre>
+            </section>
           </div>
         </div>
+      )}
+
+      {!loadingPreview && !activePreview && !feedback.message && (
+        <p className="template-empty-state" role="status">This template preview is unavailable.</p>
       )}
     </section>
   );

@@ -200,7 +200,7 @@ def test_authorized_admin_can_approve_role_request_with_audit_log():
     assert any(row["action"] == "role_request_reviewed" and row["target_user_id"] == uid for row in audit)
 
 
-def test_bootstrap_requires_verified_allowlisted_author_and_is_one_time(monkeypatch):
+def test_bootstrap_requires_verified_allowlisted_author_and_is_one_time(monkeypatch, tmp_path):
     from app.db.database import get_db
     from secrets import token_urlsafe
 
@@ -243,11 +243,32 @@ def test_bootstrap_requires_verified_allowlisted_author_and_is_one_time(monkeypa
     assert invalid_server_secret.status_code == 503
 
     monkeypatch.setenv("ADMIN_BOOTSTRAP_SECRET", token_urlsafe(48))
+    from app.db import database
     configured_database_path = os.environ["SMARTDOCS_DATABASE_PATH"]
+    # With no explicit path, bootstrap must inspect the same database that
+    # normal connections resolve as the default, without creating a new file.
+    monkeypatch.setattr(database, "DEFAULT_DB_PATH", type(database.DEFAULT_DB_PATH)(configured_database_path))
+    with get_db() as conn:
+        conn.execute("UPDATE users SET firebase_uid=? WHERE id='bootstrap-author'", (uid,))
     monkeypatch.delenv("SMARTDOCS_DATABASE_PATH")
-    missing_persistent_path = client.post("/api/auth/bootstrap-admin", headers=firebase_headers(email, uid, True))
-    assert missing_persistent_path.status_code == 503
+    missing_default_path = tmp_path / "missing" / "smartdocs.db"
+    monkeypatch.setattr(database, "DEFAULT_DB_PATH", missing_default_path)
+    missing_default = client.get("/api/auth/bootstrap-admin/status", headers=firebase_headers(email, uid, True))
+    assert missing_default.status_code == 503
+    missing_default_promotion = client.post("/api/auth/bootstrap-admin", headers=firebase_headers(email, uid, True))
+    assert missing_default_promotion.status_code == 503
+    assert not missing_default_path.exists()
+    monkeypatch.setattr(database, "DEFAULT_DB_PATH", type(database.DEFAULT_DB_PATH)(configured_database_path))
+    fallback_status = client.get("/api/auth/bootstrap-admin/status", headers=firebase_headers(email, uid, True))
+    assert fallback_status.status_code == 200
+    assert fallback_status.json() == {"ready": True, "email": email}
+    assert os.path.isfile(configured_database_path)
+    with get_db() as conn:
+        assert conn.execute("SELECT role FROM users WHERE id='bootstrap-author'").fetchone()["role"] == "author"
+        assert conn.execute("SELECT 1 FROM system_bootstrap WHERE id=1").fetchone() is None
     monkeypatch.setenv("SMARTDOCS_DATABASE_PATH", configured_database_path)
+    with get_db() as conn:
+        conn.execute("UPDATE users SET firebase_uid=NULL WHERE id='bootstrap-author'")
 
     missing_database = configured_database_path + ".does-not-exist"
     monkeypatch.setenv("SMARTDOCS_DATABASE_PATH", missing_database)
@@ -266,6 +287,16 @@ def test_bootstrap_requires_verified_allowlisted_author_and_is_one_time(monkeypa
     unlinked_promotion = client.post("/api/auth/bootstrap-admin", headers=firebase_headers(email, uid, True))
     assert unlinked_promotion.status_code == 409
     with get_db() as conn:
+        conn.execute("DELETE FROM users WHERE id='bootstrap-author'")
+    missing_profile_promotion = client.post("/api/auth/bootstrap-admin", headers=firebase_headers(email, uid, True))
+    assert missing_profile_promotion.status_code == 403
+    with get_db() as conn:
+        assert conn.execute("SELECT 1 FROM users WHERE role='admin' AND is_active=1").fetchone() is None
+        assert conn.execute("SELECT 1 FROM system_bootstrap WHERE id=1").fetchone() is None
+        conn.execute(
+            "INSERT INTO users (id,email,hashed_password,full_name,role,status,is_active,is_verified,firebase_uid) VALUES (?,?,?,?,?,'active',1,1,NULL)",
+            ("bootstrap-author", email, "firebase-managed", "Bootstrap Author", "author"),
+        )
         conn.execute("UPDATE users SET firebase_uid=? WHERE id='bootstrap-author'", (uid,))
 
     ready = client.get("/api/auth/bootstrap-admin/status", headers=firebase_headers(email, uid, True))

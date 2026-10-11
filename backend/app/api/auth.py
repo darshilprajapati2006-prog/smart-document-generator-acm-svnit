@@ -17,7 +17,7 @@ from typing import Dict, Any, List, Optional
 from fastapi import APIRouter, HTTPException, Depends, Header, Request, status
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from app.db.database import get_db
+from app.db.database import get_db, get_db_path
 from app.core.security import (
     require_authenticated_user,
     require_role,
@@ -411,7 +411,7 @@ def _verified_bootstrap_identity(authorization: Optional[str]) -> tuple[Dict[str
 
 
 def _bootstrap_configuration(email: str) -> Path:
-    """Validate backend arming settings and require an existing SQLite file."""
+    """Validate backend arming settings and resolve the existing app SQLite file."""
     configured_secret = os.environ.get("ADMIN_BOOTSTRAP_SECRET", "").strip()
     if len(configured_secret) < 32 or configured_secret.lower().startswith("replace-with-"):
         raise HTTPException(status_code=503, detail="System Admin bootstrap is not configured on the server.")
@@ -422,10 +422,10 @@ def _bootstrap_configuration(email: str) -> Path:
     if not secrets.compare_digest(email, bootstrap_email):
         raise HTTPException(status_code=403, detail="This Firebase account is not authorized for initial System Admin setup.")
 
-    database_path = os.environ.get("SMARTDOCS_DATABASE_PATH", "").strip()
-    if not database_path:
-        raise HTTPException(status_code=503, detail="System Admin bootstrap requires an explicitly configured persistent database path.")
-    path = Path(database_path).expanduser()
+    # Use the exact resolver used by get_db(), including the app's default when
+    # SMARTDOCS_DATABASE_PATH is unset. Bootstrap itself never opens this path
+    # for writing until the read-only preflight confirms the linked Author row.
+    path = get_db_path()
     # Do not let SQLite silently create a new, empty database on a mistyped
     # Render path. Bootstrap may only inspect and modify an existing DB file.
     if not path.is_absolute() or not path.is_file():
