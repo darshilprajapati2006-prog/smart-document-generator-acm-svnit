@@ -1423,24 +1423,28 @@
 }
 
 .clause-insert-btn {
-  background: #f1f5f9;
-  border: 1px solid #cbd5e1;
-  color: #1e293b;
+  min-height: 40px;
+  background: var(--surface-soft);
+  border: 1px solid var(--line);
+  color: var(--text-secondary);
   padding: 6px 12px;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   font-size: 12px;
   font-weight: 600;
   cursor: pointer;
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  transition: all 0.15s ease;
+  transition: color var(--duration-fast), background var(--duration-fast), border-color var(--duration-fast), transform var(--duration-fast);
 }
 
 .clause-insert-btn:hover {
-  background: #e2e8f0;
-  border-color: #94a3b8;
+  background: rgba(179, 155, 255, 0.1);
+  border-color: rgba(179, 155, 255, 0.42);
+  color: var(--text);
+  transform: translateY(-1px);
 }
+.clause-insert-btn:active { transform:translateY(0); }
 
 .action-card-grid {
   display: grid;
