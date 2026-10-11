@@ -383,6 +383,7 @@ export default function ClausesModal({
                     <button
                       key={cat}
                       type="button"
+                      className={`clause-category-tab${selectedCategory === cat ? " is-active" : ""}`}
                       onClick={() => setSelectedCategory(cat)}
                       style={{
                         padding: "5px 12px",

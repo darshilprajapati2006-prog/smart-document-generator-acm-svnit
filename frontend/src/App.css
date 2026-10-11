@@ -1857,6 +1857,26 @@ button:disabled,.primary-btn:disabled,.secondary-btn:disabled { opacity:.5; curs
 .theme-modal-card button:not(.user-mgmt-close-btn):not(.user-mgmt-delete-btn):not(.user-mgmt-toggle-btn) { min-height:36px; }
 .clauses-modal-overlay { backdrop-filter:blur(6px); -webkit-backdrop-filter:blur(6px); }
 
+/* Keep the reusable clause editor aligned with the dark workspace theme. */
+.clauses-modal-card { background:var(--surface)!important; color:var(--text)!important; }
+.clauses-modal-card > div:first-child,
+.clauses-modal-card > div:last-child { background:var(--surface-raised)!important; border-color:var(--line)!important; }
+.clauses-modal-card [style*="background: #ffffff"],
+.clauses-modal-card [style*="background: #f8fafc"] { background:var(--surface-soft)!important; color:var(--text-secondary)!important; border-color:var(--line)!important; }
+.clauses-modal-card [style*="color: #0f172a"],
+.clauses-modal-card [style*="color: #1e293b"],
+.clauses-modal-card [style*="color: #334155"],
+.clauses-modal-card [style*="color: #475569"],
+.clauses-modal-card [style*="color: #64748b"],
+.clauses-modal-card [style*="color: #94a3b8"] { color:var(--text-secondary)!important; }
+.clauses-modal-card .clause-category-tab { border-color:var(--line)!important; color:var(--text-secondary)!important; background:var(--surface-soft)!important; }
+.clauses-modal-card .clause-category-tab.is-active { border-color:var(--violet-strong)!important; color:#191522!important; background:var(--violet-strong)!important; }
+.clauses-modal-card :is(input,select,textarea) { border-color:var(--line)!important; color:var(--text)!important; background:var(--surface-soft)!important; }
+.clauses-modal-card :is(input,select,textarea)::placeholder { color:var(--muted)!important; }
+.clauses-modal-card button.primary-button { border-color:transparent!important; color:#191522!important; background:var(--violet-strong)!important; }
+.clauses-modal-card button.primary-button:disabled { color:var(--muted)!important; background:var(--surface-soft)!important; }
+.clauses-modal-card button.secondary-button { border-color:var(--line)!important; color:var(--text-secondary)!important; background:var(--surface-soft)!important; }
+
 /* ==========================================================================
    USER & ROLE MANAGEMENT (SYSTEM ADMIN) MODAL DESIGN SYSTEM
    ========================================================================== */
