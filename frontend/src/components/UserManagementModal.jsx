@@ -34,6 +34,7 @@ export default function UserManagementModal({ isOpen, onClose, currentUserId }) 
   const [invitations, setInvitations] = useState([]);
   const [roleRequests, setRoleRequests] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [activeSection, setActiveSection] = useState("accounts");
   const [error, setError] = useState(null);
   const [successMsg, setSuccessMsg] = useState(null);
 
@@ -43,6 +44,12 @@ export default function UserManagementModal({ isOpen, onClose, currentUserId }) 
   const [invitationUrl, setInvitationUrl] = useState("");
   const [creating, setCreating] = useState(false);
   const [copied, setCopied] = useState(false);
+
+  const pendingInvitations = invitations.filter((invitation) =>
+    !invitation.used_at &&
+    !invitation.revoked_at &&
+    new Date(invitation.expires_at) > new Date()
+  );
 
   useEffect(() => {
     if (isOpen) {
@@ -256,11 +263,6 @@ export default function UserManagementModal({ isOpen, onClose, currentUserId }) 
 
         {/* Action & Stats Bar */}
         <div className="user-mgmt-action-bar">
-          <div className="user-mgmt-stats">
-            <span>Total Registered Accounts:</span>
-            <span className="user-mgmt-count-pill">{users.length}</span>
-          </div>
-
           <div className="user-mgmt-action-btns">
             <button
               type="button"
@@ -274,7 +276,10 @@ export default function UserManagementModal({ isOpen, onClose, currentUserId }) 
             <button
               type="button"
               className={showCreateForm ? "secondary-btn" : "primary-btn"}
-              onClick={() => setShowCreateForm(!showCreateForm)}
+              onClick={() => {
+                setActiveSection("invitations");
+                setShowCreateForm((visible) => !visible);
+              }}
             >
               {showCreateForm ? "✕ Cancel" : "➕ Invite User"}
             </button>
@@ -297,8 +302,43 @@ export default function UserManagementModal({ isOpen, onClose, currentUserId }) 
           </div>
         )}
 
+        <div className="user-mgmt-tabs" role="tablist" aria-label="User management sections">
+          {[
+            { id: "accounts", label: "Total Registered Accounts", count: users.length },
+            { id: "invitations", label: "Pending Invitations", count: pendingInvitations.length },
+            { id: "requests", label: "Role Change Requests", count: roleRequests.length },
+          ].map((tab, index, tabs) => (
+            <button
+              key={tab.id}
+              id={`user-mgmt-tab-${tab.id}`}
+              type="button"
+              role="tab"
+              aria-selected={activeSection === tab.id}
+              aria-controls={`user-mgmt-panel-${tab.id}`}
+              tabIndex={activeSection === tab.id ? 0 : -1}
+              className={`user-mgmt-tab${activeSection === tab.id ? " active" : ""}`}
+              onClick={() => setActiveSection(tab.id)}
+              onKeyDown={(event) => {
+                if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+                event.preventDefault();
+                const nextIndex = event.key === "Home" ? 0
+                  : event.key === "End" ? tabs.length - 1
+                    : (index + (event.key === "ArrowRight" ? 1 : -1) + tabs.length) % tabs.length;
+                const nextTab = tabs[nextIndex];
+                setActiveSection(nextTab.id);
+                event.currentTarget.parentElement
+                  ?.querySelector(`#user-mgmt-tab-${nextTab.id}`)
+                  ?.focus();
+              }}
+            >
+              <span>{tab.label}</span>
+              <span className="user-mgmt-tab-count">{tab.count}</span>
+            </button>
+          ))}
+        </div>
+
         {/* Admin invitation form */}
-        {showCreateForm && (
+        {showCreateForm && activeSection === "invitations" && (
           <form onSubmit={handleCreateUser} className="user-mgmt-invite-card">
             <div className="user-mgmt-invite-grid">
               <div className="user-mgmt-input-group">
@@ -368,6 +408,14 @@ export default function UserManagementModal({ isOpen, onClose, currentUserId }) 
 
         {/* Main Content Area */}
         <div className="user-mgmt-body">
+          <section
+            id="user-mgmt-panel-accounts"
+            role="tabpanel"
+            aria-labelledby="user-mgmt-tab-accounts"
+            tabIndex={0}
+            className="user-mgmt-panel"
+            hidden={activeSection !== "accounts"}
+          >
           {loading ? (
             <div className="empty-state">Loading registered accounts...</div>
           ) : users.length === 0 ? (
@@ -507,12 +555,23 @@ export default function UserManagementModal({ isOpen, onClose, currentUserId }) 
               </table>
             </div>
           )}
+          </section>
 
           {/* Pending Invitations Sub-table */}
-          {invitations.length > 0 && (
+          <section
+            id="user-mgmt-panel-invitations"
+            role="tabpanel"
+            aria-labelledby="user-mgmt-tab-invitations"
+            tabIndex={0}
+            className="user-mgmt-panel"
+            hidden={activeSection !== "invitations"}
+          >
+          {loading ? (
+            <div className="empty-state">Loading invitations...</div>
+          ) : pendingInvitations.length > 0 ? (
             <div className="user-mgmt-sub-section">
               <div className="user-mgmt-sub-header">
-                <h4>Pending Invitations ({invitations.length})</h4>
+                <h4>Pending Invitations ({pendingInvitations.length})</h4>
               </div>
               <div className="user-mgmt-table-scroll">
                 <table className="user-mgmt-table user-mgmt-invitations-table">
@@ -526,14 +585,7 @@ export default function UserManagementModal({ isOpen, onClose, currentUserId }) 
                     </tr>
                   </thead>
                   <tbody>
-                    {invitations.map((inv) => {
-                      const inviteStatus = inv.used_at
-                        ? "Accepted"
-                        : inv.revoked_at
-                        ? "Revoked"
-                        : new Date(inv.expires_at) <= new Date()
-                        ? "Expired"
-                        : "Pending";
+                    {pendingInvitations.map((inv) => {
                       return (
                         <tr key={inv.id}>
                           <td data-label="Email" className="user-mgmt-email-cell">{inv.email}</td>
@@ -543,23 +595,21 @@ export default function UserManagementModal({ isOpen, onClose, currentUserId }) 
                             </span>
                           </td>
                           <td data-label="Status">
-                            <span className={`user-mgmt-verified-badge ${inviteStatus === "Pending" ? "pending" : "verified"}`}>
-                              {inviteStatus}
+                            <span className="user-mgmt-verified-badge pending">
+                              Pending
                             </span>
                           </td>
                           <td data-label="Expires" className="user-mgmt-date-cell">
                             {new Date(inv.expires_at).toLocaleString()}
                           </td>
                           <td data-label="Actions" style={{ textAlign: "right" }}>
-                            {inviteStatus === "Pending" && (
-                              <button
-                                type="button"
-                                className="user-mgmt-toggle-btn btn-deactivate"
-                                onClick={() => handleRevokeInvitation(inv)}
-                              >
-                                Revoke
-                              </button>
-                            )}
+                            <button
+                              type="button"
+                              className="user-mgmt-toggle-btn btn-deactivate"
+                              onClick={() => handleRevokeInvitation(inv)}
+                            >
+                              Revoke
+                            </button>
                           </td>
                         </tr>
                       );
@@ -568,10 +618,21 @@ export default function UserManagementModal({ isOpen, onClose, currentUserId }) 
                 </table>
               </div>
             </div>
-          )}
+          ) : <div className="empty-state">No pending invitations.</div>}
+          </section>
 
           {/* Role Requests Sub-table */}
-          {roleRequests.length > 0 && (
+          <section
+            id="user-mgmt-panel-requests"
+            role="tabpanel"
+            aria-labelledby="user-mgmt-tab-requests"
+            tabIndex={0}
+            className="user-mgmt-panel"
+            hidden={activeSection !== "requests"}
+          >
+          {loading ? (
+            <div className="empty-state">Loading role change requests...</div>
+          ) : roleRequests.length > 0 ? (
             <div className="user-mgmt-sub-section">
               <div className="user-mgmt-sub-header">
                 <h4>Role Change Requests ({roleRequests.length})</h4>
@@ -630,7 +691,8 @@ export default function UserManagementModal({ isOpen, onClose, currentUserId }) 
                 </table>
               </div>
             </div>
-          )}
+          ) : <div className="empty-state">No role change requests.</div>}
+          </section>
         </div>
 
         {/* Footer */}

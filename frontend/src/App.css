@@ -2734,3 +2734,80 @@ input[type="file"]::file-selector-button { min-height:32px; margin-right:10px; p
   .user-mgmt-table tbody tr { grid-template-columns:1fr 1fr; }
   .user-mgmt-invite-grid { gap:10px; }
 }
+
+/* Keep the three management views visible while their selected panel scrolls. */
+.user-mgmt-action-bar { justify-content:flex-end; flex:0 0 auto; }
+.user-mgmt-tabs {
+  position:relative;
+  z-index:1;
+  display:grid;
+  grid-template-columns:repeat(3,minmax(0,1fr));
+  gap:8px;
+  padding:12px 24px;
+  border-bottom:1px solid var(--line);
+  background:var(--surface);
+  flex:0 0 auto;
+}
+.user-mgmt-tab {
+  min-width:0;
+  min-height:48px;
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:10px;
+  padding:10px 14px;
+  border:1px solid var(--line);
+  border-radius:var(--radius-sm);
+  background:var(--surface-soft);
+  color:var(--text-secondary);
+  font:inherit;
+  font-size:.82rem;
+  font-weight:600;
+  line-height:1.35;
+  cursor:pointer;
+  text-align:left;
+  transition:background var(--duration-fast),border-color var(--duration-fast),color var(--duration-fast),box-shadow var(--duration-fast);
+}
+.user-mgmt-tab:hover { border-color:rgba(179,155,255,.55); color:var(--text); }
+.user-mgmt-tab.active {
+  border-color:rgba(179,155,255,.78);
+  background:rgba(125,91,210,.18);
+  color:var(--text);
+  box-shadow:inset 0 -2px 0 var(--violet);
+}
+.user-mgmt-tab:focus-visible { outline:2px solid var(--focus); outline-offset:2px; }
+.user-mgmt-tab-count {
+  min-width:26px;
+  height:26px;
+  padding:0 7px;
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  border:1px solid var(--line);
+  border-radius:999px;
+  background:rgba(255,255,255,.045);
+  color:var(--text);
+  font-size:.75rem;
+  font-weight:750;
+  flex:0 0 auto;
+}
+.user-mgmt-tab.active .user-mgmt-tab-count { border-color:rgba(179,155,255,.4); background:rgba(179,155,255,.16); }
+.user-mgmt-body { min-height:0; min-width:0; }
+.user-mgmt-panel { min-width:0; width:100%; }
+.user-mgmt-panel[hidden] { display:none!important; }
+.user-mgmt-panel#user-mgmt-panel-accounts .user-mgmt-table-scroll {
+  max-height:min(54vh,560px);
+  overflow:auto;
+  overscroll-behavior:contain;
+}
+
+@media (max-width:700px) {
+  .user-mgmt-tabs { gap:6px; padding:10px 14px; }
+  .user-mgmt-tab { min-height:54px; padding:8px 9px; gap:6px; font-size:.72rem; }
+  .user-mgmt-tab-count { min-width:23px; height:23px; }
+}
+@media (max-width:460px) {
+  .user-mgmt-tabs { grid-template-columns:1fr; }
+  .user-mgmt-tab { min-height:42px; }
+  .user-mgmt-body { padding:12px; }
+}

@@ -501,7 +501,7 @@ export async function logoutUser() {
 }
 
 export async function fetchUsers() {
-  const res = await fetch(`${API_BASE_URL}/api/auth/users`, { headers: getHeaders() });
+  const res = await fetch(`${API_BASE_URL}/api/auth/users`, { headers: getHeaders(), cache: "no-store" });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
     throw new Error(err.detail || "Failed to load users list.");
@@ -569,7 +569,7 @@ export async function createRoleRequest(requestedRole) {
 }
 
 export async function fetchRoleRequests() {
-  const res = await fetch(`${API_BASE_URL}/api/auth/role-requests`, { headers: getHeaders() });
+  const res = await fetch(`${API_BASE_URL}/api/auth/role-requests`, { headers: getHeaders(), cache: "no-store" });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
     throw new Error(err.detail || "Failed to load role requests.");
