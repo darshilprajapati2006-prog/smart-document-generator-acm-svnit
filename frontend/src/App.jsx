@@ -10,6 +10,7 @@ import LoginPage from "./components/LoginPage";
 import AdminBootstrapPage from "./components/AdminBootstrapPage";
 import UserManagementModal from "./components/UserManagementModal";
 import RoleRequestModal from "./components/RoleRequestModal";
+import AppFooter from "./components/AppFooter";
 import {
   checkBackendHealth,
   generateExecutiveMeet,
@@ -1124,6 +1125,19 @@ export default function App() {
   function navigateToTab(tab) {
     setActiveTab(tab);
     setMobileNavOpen(false);
+  }
+
+  function navigateFromFooter(tab, documentType = null, targetId = null) {
+    setActiveTab(tab);
+    setMobileNavOpen(false);
+    if (documentType) handleTypeChange(documentType);
+    if (targetId) {
+      window.requestAnimationFrame(() => {
+        document.getElementById(targetId)?.scrollIntoView({ behavior: "smooth", block: "start" });
+      });
+    } else {
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    }
   }
 
   if (authChecking) {
@@ -2499,10 +2513,11 @@ export default function App() {
           <AnalyticsDashboard role={currentRole} lang={lang} />
         )}
 
-        <footer className="page-footer">
-          <span>Smart Document Generator · ACM SVNIT</span>
-          <span>FastAPI Backend · React Frontend</span>
-        </footer>
+        <AppFooter
+          onNavigate={navigateFromFooter}
+          canManageUsers={currentRole === "admin"}
+          onManageUsers={() => setShowUserMgmt(true)}
+        />
       </main>
 
       {/* CLAUSES MODAL */}
