@@ -1,5 +1,6 @@
 import re
 import time
+from pathlib import Path
 from datetime import datetime
 from typing import Dict, Any, Optional, List
 from fastapi import APIRouter, HTTPException, Depends
@@ -868,6 +869,36 @@ def get_document_version_detail(doc_id: str, version_num: int, current_user: Dic
     if not v:
         raise HTTPException(status_code=404, detail=f"Version {version_num} for document '{doc_id}' not found.")
     return v
+
+@router.get("/{doc_id}/download/pdf")
+def download_approved_document_pdf(doc_id: str, current_user: Dict[str, Any] = Depends(require_authenticated_user)):
+    """Downloads the current approved version's stored PDF after document access checks."""
+    doc = _assert_document_access(doc_id, current_user)
+    if doc.get("status") != "approved":
+        raise HTTPException(status_code=409, detail="PDF download is available after the current document version is approved.")
+
+    version = doc.get("latest_version") or {}
+    stored_pdf_path = version.get("pdf_path")
+    if not stored_pdf_path:
+        raise HTTPException(status_code=404, detail="The approved document PDF is unavailable. Generate a new version to create its PDF.")
+
+    pdf_path = Path(stored_pdf_path).resolve()
+    storage_root = file_manager.base_dir.resolve()
+    if not pdf_path.is_relative_to(storage_root) or not pdf_path.is_file():
+        raise HTTPException(status_code=404, detail="The approved document PDF is unavailable. Generate a new version to create its PDF.")
+    try:
+        with pdf_path.open("rb") as pdf_file:
+            if pdf_file.read(5) != b"%PDF-":
+                raise HTTPException(status_code=404, detail="The stored PDF is invalid or unavailable. Generate a new version to create its PDF.")
+    except OSError:
+        raise HTTPException(status_code=404, detail="The approved document PDF is unavailable. Generate a new version to create its PDF.")
+
+    return FileResponse(
+        path=str(pdf_path),
+        filename=pdf_path.name,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{pdf_path.name}"'},
+    )
 
 @router.post("/{doc_id}/versions/{version_num}/restore")
 def restore_document_version(doc_id: str, version_num: int, current_user: Dict[str, Any] = Depends(require_authenticated_user)):

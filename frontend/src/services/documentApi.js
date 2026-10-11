@@ -189,6 +189,36 @@ export async function fetchDocumentVersions(docId) {
   return res.json();
 }
 
+export async function downloadApprovedDocumentPdf(docId) {
+  const res = await fetch(apiUrl(`/api/documents/${encodeURIComponent(docId)}/download/pdf`), {
+    headers: getHeaders(),
+    cache: "no-store",
+  });
+  if (!res.ok) {
+    const error = await res.json().catch(() => ({}));
+    throw new Error(formatApiError(error, "Unable to download the approved PDF."));
+  }
+
+  if (!res.headers.get("content-type")?.toLowerCase().startsWith("application/pdf")) {
+    throw new Error("The server did not return a PDF file.");
+  }
+  const blob = await res.blob();
+  if (await blob.slice(0, 5).text() !== "%PDF-") {
+    throw new Error("The downloaded file is not a valid PDF.");
+  }
+
+  const disposition = res.headers.get("content-disposition") || "";
+  const encodedName = disposition.match(/filename\*=UTF-8''([^;]+)/i)?.[1];
+  const plainName = disposition.match(/filename="?([^";]+)"?/i)?.[1];
+  let filename = "approved-document.pdf";
+  try {
+    filename = encodedName ? decodeURIComponent(encodedName) : (plainName || filename);
+  } catch {
+    filename = plainName || filename;
+  }
+  return { blob, filename };
+}
+
 export async function fetchDocumentVersionDetail(docId, versionNum) {
   const res = await fetch(`${API_BASE_URL}/api/documents/${docId}/versions/${versionNum}`, { headers: getHeaders() });
   if (!res.ok) throw new Error("Failed to load version details.");

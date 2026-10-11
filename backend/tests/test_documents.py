@@ -129,6 +129,95 @@ def test_executive_meet_generation(tmp_path):
     assert dl_pdf.headers["content-type"] == "application/pdf"
     assert len(dl_pdf.content) > 1000
 
+def test_approved_current_version_pdf_download_is_valid_and_access_controlled():
+    import shutil
+    import subprocess
+    from app.db.database import get_db
+
+    payload = {
+        "ref_no": "ACM/26-27/PDF/001",
+        "date": "11/10/2026",
+        "submitted_to": "Head of Department, CSE",
+        "subject": "Permission for PDF download workflow test",
+        "event_name": "Authenticated Approved PDF Download Test",
+        "venue": "Seminar Hall 402, SVNIT Surat",
+        "event_date": "20/10/2026",
+        "time_from": "10:00 AM",
+        "time_to": "01:00 PM",
+        "brief_description": "Test the approved document PDF download.",
+        "objective": "Verify the generated official PDF can be opened.",
+        "participants": "42",
+        "mode": "Offline",
+        "organizers": "ACM Student Chapter, SVNIT Surat",
+        "lead_name": "PDF Test Author",
+    }
+    generated = client.post("/api/documents/executive-meet/generate", json=payload)
+    assert generated.status_code == 200, generated.text
+    doc_id = generated.json()["repository_id"]
+    download_url = f"/api/documents/{doc_id}/download/pdf"
+
+    # A generated file is not downloadable as an approved document until workflow approval.
+    draft_download = client.get(download_url)
+    assert draft_download.status_code == 409
+
+    author_headers = {"Authorization": "Bearer test-firebase:usr-author-01:author@svnit.acm.org:1"}
+    reviewer_headers = {"Authorization": "Bearer test-firebase:usr-reviewer-01:reviewer@svnit.acm.org:1"}
+    approver_headers = {"Authorization": "Bearer test-firebase:usr-approver-01:approver@svnit.acm.org:1"}
+    for target_status, headers in (
+        ("ready_for_review", author_headers),
+        ("in_review", reviewer_headers),
+        ("approved", approver_headers),
+    ):
+        transition = client.post(
+            f"/api/documents/{doc_id}/workflow/transition",
+            headers=headers,
+            json={"target_status": target_status, "comment": "PDF workflow test"},
+        )
+        assert transition.status_code == 200, transition.text
+
+    pdf_response = client.get(download_url, headers=author_headers)
+    assert pdf_response.status_code == 200
+    assert pdf_response.headers["content-type"] == "application/pdf"
+    assert pdf_response.headers["content-disposition"].lower().endswith(".pdf\"")
+    assert pdf_response.content.startswith(b"%PDF-")
+    assert b"%%EOF" in pdf_response.content[-1024:]
+    assert b"/Type /Page" in pdf_response.content
+    with get_db() as conn:
+        version = conn.execute(
+            "SELECT pdf_path FROM document_versions WHERE document_id=? AND version_num=1", (doc_id,)
+        ).fetchone()
+    generated_pdf_path = Path(version["pdf_path"])
+    assert pdf_response.content == generated_pdf_path.read_bytes()
+    file_command = shutil.which("file")
+    if file_command:
+        description = subprocess.run(
+            [file_command, "-b", str(generated_pdf_path)], check=True, capture_output=True, text=True
+        ).stdout
+        assert "PDF document" in description
+
+    # A different Author cannot use the download route to access this document.
+    with get_db() as conn:
+        conn.execute(
+            "INSERT INTO users (id,email,hashed_password,full_name,role,status,is_active,is_verified,firebase_uid) "
+            "VALUES (?,?,?,?,?,'active',1,1,?)",
+            ("usr-author-outside", "anotherauthor@svnit.ac.in", "firebase-managed", "Other Author", "author", "usr-author-outside"),
+        )
+    other_author = client.get(
+        download_url,
+        headers={"Authorization": "Bearer test-firebase:usr-author-outside:anotherauthor@svnit.ac.in:1"},
+    )
+    assert other_author.status_code == 403
+
+    # A missing stored PDF reports a real error instead of returning the DOCX under a PDF name.
+    with get_db() as conn:
+        conn.execute(
+            "UPDATE document_versions SET pdf_path=? WHERE document_id=? AND version_num=1",
+            (str(generated_pdf_path.with_name("missing.pdf")), doc_id),
+        )
+    missing_pdf = client.get(download_url, headers=author_headers)
+    assert missing_pdf.status_code == 404
+    assert "PDF is unavailable" in missing_pdf.json()["detail"]
+
 def test_executive_meet_validation():
     # Missing required fields like date, event_date, brief_description
     response = client.post("/api/documents/executive-meet/generate", json={})

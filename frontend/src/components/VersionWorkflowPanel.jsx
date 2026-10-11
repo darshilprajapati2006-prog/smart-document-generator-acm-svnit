@@ -7,6 +7,7 @@ import {
   fetchWorkflowHistory,
   signDocument,
   verifySignature,
+  downloadApprovedDocumentPdf,
   exportToGoogleDrive,
   distributeByEmail
 } from "../services/documentApi";
@@ -17,6 +18,7 @@ export default function VersionWorkflowPanel({ documentId, role }) {
   const [versions, setVersions] = useState([]);
   const [workflowLogs, setWorkflowLogs] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [downloadingPdf, setDownloadingPdf] = useState(false);
   const [actionFeedback, setActionFeedback] = useState({ type: "", message: "" });
 
   // Transition form
@@ -154,6 +156,27 @@ export default function VersionWorkflowPanel({ documentId, role }) {
     }
   }
 
+  async function handleDownloadPdf() {
+    setDownloadingPdf(true);
+    try {
+      const { blob, filename } = await downloadApprovedDocumentPdf(selectedDocId);
+      const objectUrl = URL.createObjectURL(blob);
+      const anchor = window.document.createElement("a");
+      anchor.href = objectUrl;
+      anchor.download = filename;
+      anchor.style.display = "none";
+      window.document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      window.setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
+      setActionFeedback({ type: "success", message: "Approved PDF downloaded." });
+    } catch (err) {
+      setActionFeedback({ type: "error", message: err.message || "Unable to download the approved PDF." });
+    } finally {
+      setDownloadingPdf(false);
+    }
+  }
+
   async function handleSendEmail(e) {
     e.preventDefault();
     const recList = emailRecipients.split(",").map(r => r.trim()).filter(Boolean);
@@ -275,6 +298,16 @@ export default function VersionWorkflowPanel({ documentId, role }) {
                     </div>
                   </div>
                   <div style={{ display: "flex", gap: "8px" }}>
+                    <button
+                      type="button"
+                      className="secondary-btn"
+                      onClick={handleDownloadPdf}
+                      disabled={activeDoc.status !== "approved" || downloadingPdf}
+                      title={activeDoc.status !== "approved" ? "Available after the current version is approved" : "Download the approved PDF to this device"}
+                      style={{ padding: "6px 12px", fontSize: "0.82rem" }}
+                    >
+                      {downloadingPdf ? "Preparing PDF…" : "⬇ Download PDF"}
+                    </button>
                     <button type="button" className="secondary-btn" onClick={handleExportDrive} style={{ padding: "6px 12px", fontSize: "0.82rem" }}>
                       ☁️ Export Drive
                     </button>
