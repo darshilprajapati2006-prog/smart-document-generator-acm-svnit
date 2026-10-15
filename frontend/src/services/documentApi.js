@@ -696,7 +696,8 @@ export async function distributeByEmail(docId, payload) {
 // -------------------------------------------------------------
 
 export async function signDocument(docId, versionNum) {
-  const res = await fetch(`${API_BASE_URL}/api/documents/${docId}/signatures/sign?version_num=${versionNum || 1}`, {
+  const versionQuery = Number.isInteger(Number(versionNum)) && Number(versionNum) > 0 ? `?version_num=${Number(versionNum)}` : "";
+  const res = await fetch(`${API_BASE_URL}/api/documents/${encodeURIComponent(docId)}/signatures/sign${versionQuery}`, {
     method: "POST",
     headers: getHeaders(),
   });
@@ -708,7 +709,8 @@ export async function signDocument(docId, versionNum) {
 }
 
 export async function verifySignature(docId, versionNum) {
-  const res = await fetch(`${API_BASE_URL}/api/documents/${docId}/signatures/verify?version_num=${versionNum || 1}`, {
+  const versionQuery = Number.isInteger(Number(versionNum)) && Number(versionNum) > 0 ? `?version_num=${Number(versionNum)}` : "";
+  const res = await fetch(`${API_BASE_URL}/api/documents/${encodeURIComponent(docId)}/signatures/verify${versionQuery}`, {
     headers: getHeaders(),
   });
   if (!res.ok) {

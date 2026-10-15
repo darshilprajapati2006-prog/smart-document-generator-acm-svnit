@@ -1,5 +1,6 @@
 import os
 from pathlib import Path
+from reportlab.lib.utils import ImageReader
 from docx import Document
 from docx.shared import Inches, Pt, RGBColor
 from docx.enum.text import WD_ALIGN_PARAGRAPH
@@ -18,6 +19,7 @@ from reportlab.platypus import (
 from app.core.config import settings
 from app.schemas.executive_meet import ExecutiveMeetRequest
 from app.utils.file_manager import sanitize_filename
+from app.services.lead_signature_service import lead_signature_stream
 
 def set_cell_background(cell, fill_hex):
     shading_elm = parse_xml(f'<w:shd {nsdecls("w")} w:fill="{fill_hex}"/>')
@@ -211,7 +213,7 @@ class ExecutiveMeetService:
             row.cells[0].width = sig_w[0]
             row.cells[1].width = sig_w[1]
 
-        def format_signatory(cell, name, designation, branch, extra_lbl="", extra_val="", mobile=""):
+        def format_signatory(cell, name, designation, branch, extra_lbl="", extra_val="", mobile="", signature_data=None):
             p = cell.paragraphs[0]
             p.paragraph_format.space_after = Pt(2)
             r_n = p.add_run(f"Name: {name}\n")
@@ -228,9 +230,21 @@ class ExecutiveMeetService:
             p_sig = cell.add_paragraph()
             p_sig.paragraph_format.space_before = Pt(18)
             p_sig.paragraph_format.space_after = Pt(0)
-            r_sig = p_sig.add_run("Signature: ___________________")
-            r_sig.font.size = Pt(8.5)
-            r_sig.font.color.rgb = RGBColor(148, 163, 184)
+            signature_stream = lead_signature_stream(signature_data)
+            if signature_stream:
+                from PIL import Image
+                with Image.open(signature_stream) as signature_image:
+                    ratio = signature_image.width / signature_image.height
+                max_width, max_height = Inches(1.35), Inches(0.42)
+                scale = min(max_width / (ratio * max_height), 1.0)
+                height = max_height * scale
+                width = height * ratio
+                signature_stream.seek(0)
+                p_sig.add_run().add_picture(signature_stream, width=width, height=height)
+            else:
+                r_sig = p_sig.add_run("Signature: ___________________")
+                r_sig.font.size = Pt(8.5)
+                r_sig.font.color.rgb = RGBColor(148, 163, 184)
             set_cell_margins(cell, top=140, bottom=140, left=100, right=100)
 
         # Cell (0,0): Chairperson
@@ -241,7 +255,8 @@ class ExecutiveMeetService:
             branch=data.lead_branch,
             extra_lbl="Admission No.",
             extra_val=data.lead_admission_no,
-            mobile=data.lead_mobile
+            mobile=data.lead_mobile,
+            signature_data=data.lead_signature_data
         )
 
         # Cell (0,1): Tech Assistant
@@ -415,7 +430,7 @@ class ExecutiveMeetService:
         story.append(Spacer(1, 14))
 
         # 4-block Signatures grid
-        def make_sig_card(name, desig, branch, extra_label="", extra_val="", mobile=""):
+        def make_sig_card(name, desig, branch, extra_label="", extra_val="", mobile="", signature_data=None):
             lines = [
                 f"<b>Name:</b> {name}",
                 f"<b>Designation:</b> {desig}",
@@ -425,10 +440,20 @@ class ExecutiveMeetService:
             lines.append(f"<b>Branch:</b> {branch}")
             if mobile:
                 lines.append(f"<b>Mobile No.:</b> {mobile}")
-            lines.append("<br/><font color='#94a3b8'>Signature: ____________________</font>")
-            return Paragraph("<br/>".join(lines), body_style)
+            if not signature_data:
+                lines.append("<br/><font color='#94a3b8'>Signature: ____________________</font>")
+            paragraph = Paragraph("<br/>".join(lines), body_style)
+            if not signature_data:
+                return paragraph
+            signature_stream = lead_signature_stream(signature_data)
+            if not signature_stream:
+                return paragraph
+            width_px, height_px = ImageReader(signature_stream).getSize()
+            scale = min(1.35 * inch / width_px, 0.42 * inch / height_px)
+            signature_stream.seek(0)
+            return [paragraph, RLImage(signature_stream, width=width_px * scale, height=height_px * scale)]
 
-        card1 = make_sig_card(data.lead_name, data.lead_designation, data.lead_branch, "Admission No.", data.lead_admission_no, data.lead_mobile)
+        card1 = make_sig_card(data.lead_name, data.lead_designation, data.lead_branch, "Admission No.", data.lead_admission_no, data.lead_mobile, data.lead_signature_data)
         card2 = make_sig_card(data.tech_assist_name, data.tech_assist_designation, data.tech_assist_branch, mobile=data.tech_assist_mobile)
         card3 = make_sig_card(data.faculty_incharge_name, data.faculty_incharge_designation, data.faculty_incharge_branch)
         card4 = make_sig_card(data.faculty_chairman_name, data.faculty_chairman_designation, data.faculty_chairman_branch)

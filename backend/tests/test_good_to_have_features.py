@@ -17,6 +17,10 @@ Covers:
 14. Multilingual & Unicode text safety
 """
 import uuid
+import base64
+from io import BytesIO
+from pathlib import Path
+from zipfile import ZipFile
 import pytest
 from fastapi.testclient import TestClient
 from app.main import app
@@ -544,7 +548,11 @@ def test_cryptographic_signature_and_tamper_detection():
     sign_res = client.post(f"/api/documents/{repo_id}/signatures/sign", headers=approver_headers)
     assert sign_res.status_code == 200
     assert sign_res.json()["algorithm"] == "HMAC-SHA256"
-    assert sign_res.json()["signature_token"] is not None
+    assert sign_res.json()["payload_hash"]
+    assert "signature_token" not in sign_res.json()
+    import json
+    from app.core.security import SECRET_KEY
+    assert SECRET_KEY not in json.dumps(sign_res.json())
 
     # 2. Verify signature before alteration (Must be valid)
     verify_res1 = client.get(f"/api/documents/{repo_id}/signatures/verify")
@@ -566,6 +574,123 @@ def test_cryptographic_signature_and_tamper_detection():
     assert verify_res2.status_code == 200
     assert verify_res2.json()["is_valid"] is False
     assert verify_res2.json()["tampered"] is True
+
+
+def _png_signature_data(size=(240, 72)):
+    from PIL import Image, ImageDraw
+    image = Image.new("RGBA", size, (255, 255, 255, 0))
+    ImageDraw.Draw(image).line((8, 55, 65, 18, 112, 56, 178, 13, 228, 43), fill=(20, 30, 70, 255), width=4)
+    output = BytesIO()
+    image.save(output, format="PNG")
+    return "data:image/png;base64," + base64.b64encode(output.getvalue()).decode("ascii")
+
+
+def _minimal_exec_payload(**overrides):
+    return {
+        "date": "10/10/2026", "event_name": "Lead Signature Test", "venue": "Hall E",
+        "event_date": "25/10/2026", "brief_description": "Signature image placement",
+        "objective": "Validate student lead image rendering", **overrides,
+    }
+
+
+def test_lead_signature_upload_persists_and_renders_in_docx_and_pdf():
+    signature_data = _png_signature_data()
+    response = client.post("/api/documents/executive-meet/generate", json=_minimal_exec_payload(
+        lead_name="Student Lead", lead_signature_data=signature_data, lead_signature_confirmed=True
+    ))
+    assert response.status_code == 200, response.text
+    repo_id = response.json()["repository_id"]
+
+    from app.services.document_repository import DocumentRepository
+    version = DocumentRepository.get_version_detail(repo_id, 1)
+    assert version["data"]["lead_signature_data"].startswith("data:image/png;base64,")
+    assert version["data"]["lead_signature_confirmed"] is True
+    docx_path = Path(version["docx_path"])
+    pdf_path = Path(version["pdf_path"])
+    from docx import Document as WordDocument
+    word_doc = WordDocument(docx_path)
+    lead_signatory = word_doc.tables[-1].rows[0].cells[0]
+    assert any(run._element.xpath(".//w:drawing") for paragraph in lead_signatory.paragraphs for run in paragraph.runs)
+    with ZipFile(docx_path) as archive:
+        assert any(name.startswith("word/media/") for name in archive.namelist())
+    assert b"/Subtype /Image" in pdf_path.read_bytes()
+
+
+def test_lead_signature_rejects_bad_image_and_missing_confirmation():
+    invalid = "data:image/png;base64," + base64.b64encode(b"not an image").decode("ascii")
+    invalid_response = client.post("/api/documents/executive-meet/generate", json=_minimal_exec_payload(
+        lead_signature_data=invalid, lead_signature_confirmed=True
+    ))
+    assert invalid_response.status_code == 400
+    assert "valid PNG or JPEG" in invalid_response.json()["detail"]
+
+    unconfirmed_response = client.post("/api/documents/executive-meet/generate", json=_minimal_exec_payload(
+        lead_signature_data=_png_signature_data(), lead_signature_confirmed=False
+    ))
+    assert unconfirmed_response.status_code == 400
+    assert "Confirm authorization" in unconfirmed_response.json()["detail"]
+
+    oversized = "data:image/png;base64," + base64.b64encode(b"0" * (1024 * 1024 + 1)).decode("ascii")
+    oversized_response = client.post("/api/documents/executive-meet/generate", json=_minimal_exec_payload(
+        lead_signature_data=oversized, lead_signature_confirmed=True
+    ))
+    assert oversized_response.status_code == 400
+    assert "1 MB" in oversized_response.json()["detail"]
+
+
+def test_lead_signature_jpeg_is_accepted_and_missing_signature_keeps_blank_template_slot():
+    from PIL import Image
+    jpg = BytesIO()
+    Image.new("RGB", (180, 54), "white").save(jpg, format="JPEG")
+    jpeg_data = "data:image/jpeg;base64," + base64.b64encode(jpg.getvalue()).decode("ascii")
+    signed_result = client.post("/api/documents/executive-meet/generate", json=_minimal_exec_payload(
+        lead_signature_data=jpeg_data, lead_signature_confirmed=True
+    ))
+    assert signed_result.status_code == 200, signed_result.text
+
+    blank_result = client.post("/api/documents/executive-meet/generate", json=_minimal_exec_payload(event_name="No image"))
+    assert blank_result.status_code == 200
+    from app.services.document_repository import DocumentRepository
+    blank_version = DocumentRepository.get_version_detail(blank_result.json()["repository_id"], 1)
+    from docx import Document as WordDocument
+    blank_doc = WordDocument(blank_version["docx_path"])
+    template_text = " ".join(cell.text for table in blank_doc.tables for row in table.rows for cell in row.cells)
+    assert "Signature: ___________________" in template_text
+
+
+def test_signature_is_scoped_to_document_and_authorized_signing_role():
+    first_doc = client.post("/api/documents/executive-meet/generate", json=_minimal_exec_payload(
+        lead_signature_data=_png_signature_data(), lead_signature_confirmed=True
+    )).json()["repository_id"]
+    second_doc = client.post("/api/documents/executive-meet/generate", json=_minimal_exec_payload(event_name="Other doc")).json()["repository_id"]
+    approver_headers = get_auth_header(role="approver", user_id="usr-approver-01", name="Approver")
+    unauthorized_headers = get_auth_header(role="author", user_id="usr-author-01", name="Author")
+
+    rejected = client.post(f"/api/documents/{first_doc}/signatures/sign", headers=unauthorized_headers)
+    assert rejected.status_code == 403
+    signed = client.post(f"/api/documents/{first_doc}/signatures/sign?version_num=1", headers=approver_headers)
+    assert signed.status_code == 200
+    other_doc = client.get(f"/api/documents/{second_doc}/signatures/verify", headers=approver_headers)
+    assert other_doc.status_code == 200
+    assert other_doc.json()["is_signed"] is False
+
+    from app.services.document_repository import DocumentRepository
+    first_version = DocumentRepository.get_version_detail(first_doc, 1)
+    revised_data = {key: value for key, value in first_version["data"].items() if key not in {"lead_signature_data", "lead_signature_confirmed"}}
+    revised = client.put(f"/api/documents/{first_doc}", json={"data": revised_data, "change_summary": "Retain lead signature"})
+    assert revised.status_code == 200, revised.text
+    second_version = DocumentRepository.get_version_detail(first_doc, 2)
+    assert second_version["data"]["lead_signature_data"] == first_version["data"]["lead_signature_data"]
+    wrong_version = client.get(f"/api/documents/{first_doc}/signatures/verify?version_num=2", headers=approver_headers)
+    assert wrong_version.status_code == 200
+    assert wrong_version.json()["is_signed"] is False
+
+    from app.db.database import get_db
+    with get_db() as conn:
+        conn.execute("UPDATE digital_signatures SET signature_token = ? WHERE document_id = ? AND version_num = 1", ("0" * 64, first_doc))
+    mismatch = client.get(f"/api/documents/{first_doc}/signatures/verify?version_num=1", headers=approver_headers)
+    assert mismatch.status_code == 200
+    assert mismatch.json()["is_valid"] is False
 
 # ============================================================
 # FEATURE 13: USAGE ANALYTICS DASHBOARD

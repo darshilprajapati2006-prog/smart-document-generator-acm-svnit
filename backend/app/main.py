@@ -7,12 +7,14 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.core.config import settings
 from app.api.documents import router as documents_router
 from app.api.auth import router as auth_router
-from app.db.seed import seed_database
+from app.db.database import init_db
+from app.utils.file_manager import file_manager
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Initialize SQLite database and seed default data
-    seed_database()
+    # Apply only versioned schema migrations. Production startup never seeds users or content.
+    init_db()
+    file_manager.validate_storage_configuration()
     # Generated PDFs/DOCX files are referenced by persisted document versions.
     # Do not delete them on startup; that would break history and approved downloads.
     yield

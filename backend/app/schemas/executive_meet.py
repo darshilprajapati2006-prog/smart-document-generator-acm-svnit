@@ -31,6 +31,9 @@ class ExecutiveMeetRequest(BaseModel):
     lead_admission_no: str = Field(default="", description="Student admission number")
     lead_branch: str = Field(default="", description="Department/branch")
     lead_mobile: Optional[str] = Field(default="", description="Contact mobile number")
+    # Base64 image data is stored in the private version snapshot. It is never served as a public file.
+    lead_signature_data: Optional[str] = Field(default=None, max_length=1400000)
+    lead_signature_confirmed: bool = Field(default=False)
     
     tech_assist_name: str = Field(default="", description="Technical Assistant")
     tech_assist_designation: str = Field(default="", description="Technical Assistant role")

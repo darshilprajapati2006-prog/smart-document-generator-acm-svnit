@@ -1,4 +1,4 @@
-"""SQLite connection management. Persistence depends on the configured filesystem volume."""
+"""Database connection management for PostgreSQL and explicitly selected SQLite."""
 import sqlite3
 import os
 from pathlib import Path
@@ -6,6 +6,39 @@ from contextlib import contextmanager
 
 DB_DIR = Path(__file__).resolve().parent.parent.parent / "data"
 DEFAULT_DB_PATH = DB_DIR / "smart_doc_generator.db"
+POSTGRES_INTEGRATION_ACK = "I_HAVE_SELECTED_A_DISPOSABLE_TEST_DATABASE"
+
+
+def _configured_database_url() -> str:
+    """Select the explicitly opted-in test URL without ever falling back to production."""
+    integration_mode = os.getenv("SMARTDOCS_RUN_POSTGRES_INTEGRATION") == POSTGRES_INTEGRATION_ACK
+    if integration_mode:
+        if (
+            os.getenv("RENDER", "").lower() == "true"
+            or os.getenv("RENDER_SERVICE_ID")
+            or os.getenv("APP_ENV", "").lower() == "production"
+        ):
+            raise RuntimeError("The PostgreSQL integration-test URL override is disabled in production.")
+        test_url = os.getenv("SMARTDOCS_TEST_DATABASE_URL", "").strip()
+        if not test_url:
+            raise RuntimeError("SMARTDOCS_TEST_DATABASE_URL is required in PostgreSQL integration-test mode; DATABASE_URL is never used as a fallback.")
+        production_url = os.getenv("DATABASE_URL", "").strip()
+        if production_url and _database_target(test_url) == _database_target(production_url):
+            raise RuntimeError("SMARTDOCS_TEST_DATABASE_URL must target a database separate from DATABASE_URL.")
+        return test_url
+    return os.getenv("DATABASE_URL", "").strip()
+
+
+def _database_target(url: str) -> tuple[str, str, int | None, str]:
+    """Return a credential-free target identity for accidental same-target protection."""
+    from urllib.parse import unquote, urlsplit
+    parsed = urlsplit(url)
+    return (
+        parsed.scheme.lower(),
+        (parsed.hostname or "").lower(),
+        parsed.port,
+        unquote(parsed.path.lstrip("/")),
+    )
 
 def get_db_path() -> Path:
     configured_path = os.getenv("SMARTDOCS_DATABASE_PATH", "").strip()
@@ -13,12 +46,80 @@ def get_db_path() -> Path:
     db_path.parent.mkdir(parents=True, exist_ok=True)
     return db_path
 
+
+def _database_backend() -> str:
+    """PostgreSQL is the default; SQLite is available only by explicit opt-in."""
+    backend = os.getenv("SMARTDOCS_DB_BACKEND", "postgres").strip().lower()
+    if backend not in {"postgres", "sqlite"}:
+        raise RuntimeError("SMARTDOCS_DB_BACKEND must be 'postgres' or 'sqlite'.")
+    if backend == "sqlite" and (os.getenv("RENDER", "").lower() == "true" or os.getenv("APP_ENV", "").lower() == "production"):
+        raise RuntimeError("SQLite is disabled in production; configure DATABASE_URL for PostgreSQL.")
+    if backend == "postgres" and not _configured_database_url():
+        if os.getenv("SMARTDOCS_RUN_POSTGRES_INTEGRATION") == POSTGRES_INTEGRATION_ACK:
+            raise RuntimeError("SMARTDOCS_TEST_DATABASE_URL is required in PostgreSQL integration-test mode; refusing to fall back to DATABASE_URL or SQLite.")
+        raise RuntimeError("DATABASE_URL is required; refusing to fall back to SQLite.")
+    return backend
+
+
+class _PostgresConnection:
+    """Small sqlite-style adapter so existing query call sites retain their contracts."""
+    def __init__(self, connection):
+        self._connection = connection
+
+    @staticmethod
+    def _adapt_sql(sql: str) -> str:
+        # Translate positional SQLite placeholders without touching quoted strings/comments.
+        out, quote, i = [], None, 0
+        while i < len(sql):
+            char = sql[i]
+            if quote:
+                out.append(char)
+                if char == quote:
+                    if i + 1 < len(sql) and sql[i + 1] == quote:
+                        out.append(sql[i + 1]); i += 1
+                    else:
+                        quote = None
+            elif char in ("'", '"'):
+                quote = char; out.append(char)
+            elif char == "-" and i + 1 < len(sql) and sql[i + 1] == "-":
+                end = sql.find("\n", i)
+                if end < 0:
+                    out.append(sql[i:]); break
+                out.append(sql[i:end + 1]); i = end
+            elif char == "?":
+                out.append("%s")
+            else:
+                out.append(char)
+            i += 1
+        return "".join(out).replace("BEGIN IMMEDIATE", "BEGIN")
+
+    def execute(self, sql, params=()):
+        return self._connection.execute(self._adapt_sql(sql), params)
+
+    def commit(self): self._connection.commit()
+    def rollback(self): self._connection.rollback()
+    def close(self): self._connection.close()
+
 @contextmanager
 def get_db():
-    conn = sqlite3.connect(str(get_db_path()), timeout=20.0)
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA foreign_keys = ON")
-    conn.execute("PRAGMA journal_mode = WAL")
+    backend = _database_backend()
+    if backend == "postgres":
+        try:
+            import psycopg
+            from psycopg.conninfo import make_conninfo
+            from psycopg.rows import dict_row
+            database_url = _configured_database_url()
+            if database_url.startswith("postgres://"):
+                database_url = "postgresql://" + database_url[len("postgres://"):]
+            database_url = make_conninfo(database_url, sslmode="require", connect_timeout=10)
+            conn = _PostgresConnection(psycopg.connect(database_url, row_factory=dict_row, prepare_threshold=None))
+        except Exception as exc:
+            raise RuntimeError(f"PostgreSQL connection failed: {exc.__class__.__name__}.") from exc
+    else:
+        conn = sqlite3.connect(str(get_db_path()), timeout=20.0)
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA foreign_keys = ON")
+        conn.execute("PRAGMA journal_mode = WAL")
     try:
         yield conn
         conn.commit()
@@ -28,8 +129,8 @@ def get_db():
     finally:
         conn.close()
 
-def init_db():
-    """Initializes tables and seed data if not present."""
+def _init_sqlite_db():
+    """Legacy SQLite schema setup, retained only for explicit local/test databases."""
     with get_db() as conn:
         # 1. Users table for RBAC
         conn.execute("""
@@ -310,3 +411,12 @@ def init_db():
             FOREIGN KEY (document_id) REFERENCES documents(id) ON DELETE CASCADE
         );
         """)
+
+
+def init_db():
+    """Initialize only the selected backend schema; never seed application data."""
+    if _database_backend() == "postgres":
+        from app.db.migrations import run_migrations
+        run_migrations()
+        return
+    _init_sqlite_db()

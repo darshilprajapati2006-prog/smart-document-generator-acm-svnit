@@ -7,6 +7,8 @@ import json
 from typing import Dict, Any, List, Optional
 from datetime import datetime
 from app.db.database import get_db
+from app.utils.file_manager import file_manager
+from app.utils.supabase_storage import hydrate_signature
 
 class DocumentRepository:
     
@@ -23,6 +25,9 @@ class DocumentRepository:
         """Creates a new document record and saves version 1."""
         doc_id = f"doc-{uuid.uuid4().hex[:12]}"
         version_id = f"ver-{uuid.uuid4().hex[:12]}"
+        stored_data, stored_docx_path, stored_pdf_path = file_manager.persist_version_assets(
+            doc_id, 1, data, docx_path, pdf_path
+        )
         
         with get_db() as conn:
             conn.execute(
@@ -38,7 +43,7 @@ class DocumentRepository:
                 INSERT INTO document_versions (id, document_id, version_num, data_json, docx_path, pdf_path, change_summary, actor_id)
                 VALUES (?, ?, 1, ?, ?, ?, ?, ?)
                 """,
-                (version_id, doc_id, json.dumps(data), str(docx_path) if docx_path else None, str(pdf_path) if pdf_path else None, change_summary, user_id)
+                (version_id, doc_id, json.dumps(stored_data), stored_docx_path, stored_pdf_path, change_summary, user_id)
             )
             
         return DocumentRepository.get_document(doc_id)
@@ -58,7 +63,7 @@ class DocumentRepository:
             if v_row:
                 doc["latest_version"] = {
                     "version_num": v_row["version_num"],
-                    "data": json.loads(v_row["data_json"]),
+                    "data": hydrate_signature(json.loads(v_row["data_json"])),
                     "docx_path": v_row["docx_path"],
                     "pdf_path": v_row["pdf_path"],
                     "change_summary": v_row["change_summary"],
@@ -97,6 +102,9 @@ class DocumentRepository:
             
             new_version_num = doc_row["current_version"] + 1
             version_id = f"ver-{uuid.uuid4().hex[:12]}"
+            stored_data, stored_docx_path, stored_pdf_path = file_manager.persist_version_assets(
+                doc_id, new_version_num, new_data, docx_path, pdf_path
+            )
             
             # Any new source version invalidates in-flight approvals and returns
             # the document to its Author for a fresh review cycle.
@@ -118,7 +126,7 @@ class DocumentRepository:
                 INSERT INTO document_versions (id, document_id, version_num, data_json, docx_path, pdf_path, change_summary, actor_id)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """,
-                (version_id, doc_id, new_version_num, json.dumps(new_data), str(docx_path) if docx_path else None, str(pdf_path) if pdf_path else None, change_summary, user_id)
+                (version_id, doc_id, new_version_num, json.dumps(stored_data), stored_docx_path, stored_pdf_path, change_summary, user_id)
             )
 
         return DocumentRepository.get_document(doc_id)
@@ -147,7 +155,8 @@ class DocumentRepository:
             if not row:
                 return None
             res = dict(row)
-            res["data"] = json.loads(res["data_json"])
+            res["data"] = hydrate_signature(json.loads(res["data_json"]))
+            res["data_json"] = json.dumps(res["data"])
             return res
 
     @staticmethod

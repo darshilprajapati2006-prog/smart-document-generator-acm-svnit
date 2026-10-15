@@ -1,5 +1,6 @@
 import pytest
 import os
+os.environ.setdefault("JWT_SECRET_KEY", "smartdocs-test-secret-key-for-unit-tests-only-2026")
 from app.core import firebase_auth
 from app.core.security import decode_access_token
 from app.db.seed import seed_database
@@ -37,5 +38,7 @@ def isolate_test_database(tmp_path_factory):
     patch = pytest.MonkeyPatch()
     path = tmp_path_factory.mktemp("smartdocs-tests") / "smartdocs-test.db"
     patch.setenv("SMARTDOCS_DATABASE_PATH", str(path))
+    patch.setenv("SMARTDOCS_DB_BACKEND", "sqlite")
+    patch.setenv("SMARTDOCS_STORAGE_BACKEND", "local")
     yield path
     patch.undo()

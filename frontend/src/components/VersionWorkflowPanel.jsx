@@ -13,6 +13,24 @@ import {
 } from "../services/documentApi";
 import { getWorkflowActions } from "../utils/workflowActions.js";
 
+function decodeAuditText(value) {
+  if (value == null) return "";
+  const text = String(value);
+  if (typeof window === "undefined" || !/[&](?:amp|#\d+|#x[\da-f]+|lt|gt|quot|apos);/i.test(text)) return text;
+  const parser = new DOMParser();
+  return parser.parseFromString(text, "text/html").documentElement.textContent || "";
+}
+
+function formatAuditTimestamp(value) {
+  if (!value) return "Timestamp unavailable";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return decodeAuditText(value);
+  return new Intl.DateTimeFormat(undefined, {
+    day: "2-digit", month: "short", year: "numeric",
+    hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: true
+  }).format(date).replace(",", " ·");
+}
+
 export default function VersionWorkflowPanel({ documentId, role }) {
   const [documents, setDocuments] = useState([]);
   const [selectedDocId, setSelectedDocId] = useState(documentId || "");
@@ -29,6 +47,8 @@ export default function VersionWorkflowPanel({ documentId, role }) {
 
   // Signature state
   const [signatureResult, setSignatureResult] = useState(null);
+  const [signatureVersion, setSignatureVersion] = useState(1);
+  const [signatureLoading, setSignatureLoading] = useState(false);
 
   // Email form
   const [showEmailModal, setShowEmailModal] = useState(false);
@@ -90,6 +110,16 @@ export default function VersionWorkflowPanel({ documentId, role }) {
       setVersions(vRes.versions || []);
       setWorkflowLogs(wRes.history || []);
       setSignatureResult(null);
+      const currentVersion = vRes.versions?.[0]?.version_num || 1;
+      setSignatureVersion(currentVersion);
+      setSignatureLoading(true);
+      try {
+        setSignatureResult(await verifySignature(docId, currentVersion));
+      } catch (signatureError) {
+        setSignatureResult({ is_signed: false, is_valid: false, verification_status: "Not Verified", detail: signatureError.message });
+      } finally {
+        setSignatureLoading(false);
+      }
     } catch (err) {
       setActionFeedback({ type: "error", message: err.message });
     }
@@ -123,26 +153,44 @@ export default function VersionWorkflowPanel({ documentId, role }) {
   }
 
   async function handleSign() {
+    if (signatureLoading || role !== "approver") return;
+    setSignatureLoading(true);
     try {
-      const res = await signDocument(selectedDocId);
-      setSignatureResult(res);
+      const res = await signDocument(selectedDocId, signatureVersion);
+      setSignatureResult({ ...res, is_signed: true, is_valid: false, verification_status: "Not Verified", detail: res.message });
       setActionFeedback({ type: "success", message: res.message });
-      loadDocDetails(selectedDocId);
     } catch (err) {
       setActionFeedback({ type: "error", message: err.message });
+    } finally {
+      setSignatureLoading(false);
     }
   }
 
   async function handleVerifySignature() {
+    if (signatureLoading) return;
+    setSignatureLoading(true);
     try {
-      const res = await verifySignature(selectedDocId);
+      const res = await verifySignature(selectedDocId, signatureVersion);
       setSignatureResult(res);
-      setActionFeedback({
-        type: res.is_valid ? "success" : "error",
-        message: res.detail
-      });
+      setActionFeedback({ type: res.is_valid ? "success" : "error", message: res.detail });
     } catch (err) {
+      setSignatureResult((previous) => ({ ...(previous || {}), is_valid: false, verification_status: "Not Verified", detail: err.message }));
       setActionFeedback({ type: "error", message: err.message });
+    } finally {
+      setSignatureLoading(false);
+    }
+  }
+
+  async function handleSignatureVersionChange(event) {
+    const versionNum = Number(event.target.value);
+    setSignatureVersion(versionNum);
+    setSignatureLoading(true);
+    try {
+      setSignatureResult(await verifySignature(selectedDocId, versionNum));
+    } catch (err) {
+      setSignatureResult({ is_signed: false, is_valid: false, verification_status: "Not Verified", detail: err.message });
+    } finally {
+      setSignatureLoading(false);
     }
   }
 
@@ -434,11 +482,37 @@ export default function VersionWorkflowPanel({ documentId, role }) {
                       <div style={{ fontSize: "0.82rem", fontWeight: "700", color: "#64748b", marginBottom: "6px" }}>
                         AUDIT TRAIL:
                       </div>
-                      {workflowLogs.map((log) => (
-                        <div key={log.id} style={{ fontSize: "0.8rem", color: "#475569", marginBottom: "4px" }}>
-                          • <b>{log.actor_name}</b> ({log.actor_role}): {log.from_stage ? `${log.from_stage} · ` : ""}{log.from_status} ➔ <b>{log.to_stage ? `${log.to_stage} · ` : ""}{log.to_status}</b> {log.comment ? `("${log.comment}")` : ""} <span style={{ color: "#94a3b8" }}>[{log.created_at}]</span>
-                        </div>
-                      ))}
+                      <div className="audit-trail-list">
+                        {workflowLogs.map((log) => (
+                          <article className="audit-event-card" key={log.id}>
+                            <header className="audit-event-header">
+                              <span className="audit-actor-check" aria-hidden="true">✓</span>
+                              <div className="audit-actor-details">
+                                <strong>{decodeAuditText(log.actor_name) || "Unknown actor"}</strong>
+                                <span>{decodeAuditText(log.actor_role) || "Role unavailable"}</span>
+                              </div>
+                            </header>
+                            <div className="audit-event-sections">
+                              <section className="audit-info-section audit-transition-section">
+                                <h5><span aria-hidden="true">✓</span> Workflow Transition</h5>
+                                <div className="audit-transition-values">
+                                  <span className="audit-state-value"><small>FROM</small>{decodeAuditText(log.from_stage ? `${log.from_stage} · ${log.from_status || ""}` : log.from_status) || "Unavailable"}</span>
+                                  <span className="audit-transition-arrow" aria-label="to">→</span>
+                                  <span className="audit-state-value audit-state-to"><small>TO</small>{decodeAuditText(log.to_stage ? `${log.to_stage} · ${log.to_status || ""}` : log.to_status) || "Unavailable"}</span>
+                                </div>
+                              </section>
+                              <section className="audit-info-section">
+                                <h5><span aria-hidden="true">✓</span> Comment</h5>
+                                <p>{decodeAuditText(log.comment) || "No comment provided"}</p>
+                              </section>
+                              <section className="audit-info-section audit-time-section">
+                                <h5><span aria-hidden="true">✓</span> Date &amp; Time</h5>
+                                <p>{formatAuditTimestamp(log.created_at)}</p>
+                              </section>
+                            </div>
+                          </article>
+                        ))}
+                      </div>
                     </div>
                   )}
                 </div>
@@ -448,28 +522,27 @@ export default function VersionWorkflowPanel({ documentId, role }) {
                   <h4 style={{ fontSize: "0.95rem", fontWeight: "700", color: "var(--text, #1e293b)", margin: "0 0 10px 0" }}>
                     🔏 Cryptographic Digital Signature (HMAC-SHA256)
                   </h4>
-                  <div style={{ display: "flex", gap: "10px" }}>
-                    <button type="button" className="primary-btn" onClick={handleSign} style={{ padding: "8px 14px", fontSize: "0.85rem" }}>
-                      Apply HMAC-SHA256 Signature
-                    </button>
-                    <button type="button" className="secondary-btn" onClick={handleVerifySignature} style={{ padding: "8px 14px", fontSize: "0.85rem" }}>
-                      Verify Signature & Tamper Check
+                  <div className="signature-controls">
+                    <label className="signature-version-select">Document version
+                      <select value={signatureVersion} onChange={handleSignatureVersionChange} disabled={signatureLoading}>
+                        {versions.map((version) => <option key={version.version_num} value={version.version_num}>Version {version.version_num}</option>)}
+                      </select>
+                    </label>
+                    {role === "approver" && <button type="button" className="primary-btn" onClick={handleSign} disabled={signatureLoading} style={{ padding: "8px 14px", fontSize: "0.85rem" }}>
+                      {signatureLoading ? "Signing…" : "Apply HMAC-SHA256 Signature"}
+                    </button>}
+                    <button type="button" className="secondary-btn" onClick={handleVerifySignature} disabled={signatureLoading} style={{ padding: "8px 14px", fontSize: "0.85rem" }}>
+                      {signatureLoading ? "Verifying…" : "Verify Signature & Tamper Check"}
                     </button>
                   </div>
-                  {signatureResult && (
-                    <div style={{ marginTop: "10px", padding: "10px", background: signatureResult.is_valid !== false ? "#f0fdf4" : "#fef2f2", borderRadius: "6px", fontSize: "0.82rem" }}>
-                      <div><b>Algorithm:</b> {signatureResult.algorithm || "HMAC-SHA256"}</div>
-                      {signatureResult.signature_token && (
-                        <div style={{ wordBreak: "break-all", marginTop: "3px" }}><b>Token:</b> {signatureResult.signature_token}</div>
-                      )}
-                      {signatureResult.computed_hash && (
-                        <div style={{ wordBreak: "break-all", marginTop: "3px" }}><b>Payload Hash:</b> {signatureResult.computed_hash}</div>
-                      )}
-                      <div style={{ marginTop: "4px", fontWeight: "700", color: signatureResult.is_valid !== false ? "#166534" : "#991b1b" }}>
-                        {signatureResult.detail || signatureResult.message}
-                      </div>
-                    </div>
-                  )}
+                  <div className="signature-result-grid" aria-live="polite" aria-busy={signatureLoading}>
+                    <div className="signature-result-item"><small>Algorithm</small><strong>HMAC-SHA256</strong></div>
+                    <div className="signature-result-item"><small>Signature Status</small><strong className={signatureResult?.is_signed ? "signature-status-good" : "signature-status-neutral"}>{signatureResult?.is_signed ? "Signed" : "Not Signed"}</strong></div>
+                    <div className="signature-result-item"><small>Verification Status</small><strong className={signatureResult?.is_valid ? "signature-status-good" : signatureResult?.is_signed ? "signature-status-bad" : "signature-status-neutral"}>{signatureResult?.verification_status || "Not Verified"}</strong></div>
+                    <div className="signature-result-item signature-hash-item"><small>Payload Hash</small><code>{signatureResult?.computed_hash || signatureResult?.payload_hash || signatureResult?.expected_hash || "Not available"}</code></div>
+                  </div>
+                  {signatureLoading && <p className="signature-loading-message" role="status">Checking version {signatureVersion}…</p>}
+                  {signatureResult?.detail && <p className={`signature-detail ${signatureResult.is_valid ? "signature-status-good" : signatureResult.is_signed ? "signature-status-bad" : "signature-status-neutral"}`}>{signatureResult.detail}</p>}
                 </div>
               </div>
             )}

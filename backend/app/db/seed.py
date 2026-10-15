@@ -12,10 +12,7 @@ def seed_database():
     init_db()
     with get_db() as conn:
         # 1. Seed demo users only in testing/dev environments if enabled
-        should_seed_users = (
-            os.getenv("PYTEST_CURRENT_TEST") is not None
-            or os.getenv("SEED_DEMO_USERS", "false").lower() in ("1", "true")
-        )
+        should_seed_users = os.getenv("PYTEST_CURRENT_TEST") is not None
 
         if should_seed_users:
             users_to_seed = [
@@ -34,11 +31,6 @@ def seed_database():
                     conn.execute(
                         "INSERT INTO users (id, email, hashed_password, full_name, role, status, is_active, is_verified) VALUES (?, ?, ?, ?, ?, 'active', 1, 1)",
                         (u_id, email, hash_password(pwd), name, role)
-                    )
-                else:
-                    conn.execute(
-                        "UPDATE users SET hashed_password = ?, status = 'active', is_active = 1, is_verified = 1 WHERE email = ?",
-                        (hash_password(pwd), email)
                     )
 
         # 2. Seed pre-approved Reusable Clauses
@@ -143,14 +135,7 @@ def seed_database():
                 """
                 INSERT INTO reusable_clauses (id, name, category, applicable_types, content, variables_json, approval_status, active)
                 VALUES (?, ?, ?, ?, ?, ?, ?, 1)
-                ON CONFLICT(id) DO UPDATE SET
-                    name = excluded.name,
-                    category = excluded.category,
-                    applicable_types = excluded.applicable_types,
-                    content = excluded.content,
-                    variables_json = excluded.variables_json,
-                    approval_status = excluded.approval_status,
-                    active = 1
+                ON CONFLICT(id) DO NOTHING
                 """,
                 (cid, name, category, app_types, content, vars_json, status)
             )

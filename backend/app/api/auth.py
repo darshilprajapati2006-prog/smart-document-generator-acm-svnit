@@ -10,14 +10,13 @@ import re
 import uuid
 import hashlib
 import secrets
-import sqlite3
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Dict, Any, List, Optional
 from fastapi import APIRouter, HTTPException, Depends, Header, Request, status
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from app.db.database import get_db, get_db_path
+from app.db.database import get_db, get_db_path, _database_backend
 from app.core.security import (
     require_authenticated_user,
     require_role,
@@ -478,8 +477,8 @@ def _verified_bootstrap_identity(authorization: Optional[str]) -> tuple[Dict[str
     return claims, email, uid
 
 
-def _bootstrap_configuration(email: str) -> Path:
-    """Validate backend arming settings and resolve the existing app SQLite file."""
+def _bootstrap_configuration(email: str) -> Optional[Path]:
+    """Validate one-time bootstrap arming and guard SQLite against accidental creation."""
     configured_secret = os.environ.get("ADMIN_BOOTSTRAP_SECRET", "").strip()
     if len(configured_secret) < 32 or configured_secret.lower().startswith("replace-with-"):
         raise HTTPException(status_code=503, detail="System Admin bootstrap is not configured on the server.")
@@ -490,24 +489,27 @@ def _bootstrap_configuration(email: str) -> Path:
     if not secrets.compare_digest(email, bootstrap_email):
         raise HTTPException(status_code=403, detail="This Firebase account is not authorized for initial System Admin setup.")
 
-    # Use the exact resolver used by get_db(), including the app's default when
-    # SMARTDOCS_DATABASE_PATH is unset. Bootstrap itself never opens this path
-    # for writing until the read-only preflight confirms the linked Author row.
+    if _database_backend() == "postgres":
+        return None
+    # Do not let SQLite silently create a new database on a mistyped local path.
     path = get_db_path()
-    # Do not let SQLite silently create a new, empty database on a mistyped
-    # Render path. Bootstrap may only inspect and modify an existing DB file.
     if not path.is_absolute() or not path.is_file():
         raise HTTPException(status_code=503, detail="Configured database file does not exist; bootstrap will not create a new database.")
     return path
 
 
-def _bootstrap_profile_status(database_path: Path, email: str, uid: str) -> tuple[bool, bool]:
-    """Read readiness flags from an existing database without creating a file."""
+def _bootstrap_profile_status(database_path: Optional[Path], email: str, uid: str) -> tuple[bool, bool]:
+    """Read readiness flags through the selected database adapter."""
     try:
-        conn = sqlite3.connect(f"file:{database_path}?mode=ro", uri=True, timeout=10)
-        conn.row_factory = sqlite3.Row
-        try:
-            tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        with get_db() as conn:
+            if _database_backend() == "postgres":
+                tables = {row["table_name"] for row in conn.execute(
+                    "SELECT table_name FROM information_schema.tables WHERE table_schema='public' AND table_type='BASE TABLE'"
+                ).fetchall()}
+            else:
+                tables = {row["name"] for row in conn.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table'"
+                ).fetchall()}
             if not {"users", "system_bootstrap"}.issubset(tables):
                 raise HTTPException(status_code=503, detail="Configured database is missing required SmartDocs tables.")
             consumed = conn.execute("SELECT 1 FROM system_bootstrap WHERE id = 1").fetchone() is not None
@@ -522,11 +524,9 @@ def _bootstrap_profile_status(database_path: Path, email: str, uid: str) -> tupl
                 and profile["firebase_uid"] == uid
             )
             return consumed or active_admin, eligible
-        finally:
-            conn.close()
     except HTTPException:
         raise
-    except (sqlite3.Error, OSError):
+    except Exception:
         raise HTTPException(status_code=503, detail="Configured database could not be safely inspected.")
 
 

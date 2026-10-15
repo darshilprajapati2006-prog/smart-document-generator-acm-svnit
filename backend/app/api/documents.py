@@ -5,6 +5,7 @@ from datetime import datetime
 from typing import Dict, Any, Optional, List
 from fastapi import APIRouter, HTTPException, Depends
 from fastapi.responses import FileResponse
+from starlette.background import BackgroundTask
 from pydantic import BaseModel, Field
 
 from app.schemas.executive_meet import ExecutiveMeetRequest
@@ -29,6 +30,7 @@ from app.services.batch_service import BatchService
 from app.services.google_integration_service import GoogleIntegrationService
 from app.services.email_distribution_service import EmailDistributionService
 from app.services.signature_service import SignatureService
+from app.services.lead_signature_service import normalize_lead_signature
 from app.services.analytics_service import AnalyticsService
 from app.core.security import require_authenticated_user, require_role
 from app.db.database import get_db
@@ -72,6 +74,9 @@ def generate_executive_meet(data: ExecutiveMeetRequest, current_user: Dict[str, 
     user_id = current_user.get("sub")
     user_role = current_user.get("role")
     try:
+        data.lead_signature_data = normalize_lead_signature(
+            data.lead_signature_data, data.lead_signature_confirmed
+        )
         doc_id, session_dir = file_manager.create_session()
         
         safe_date = sanitize_filename(data.event_date.replace("/", "-"))
@@ -126,6 +131,8 @@ def generate_executive_meet(data: ExecutiveMeetRequest, current_user: Dict[str, 
                 }
             }
         }
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         duration_ms = round((time.time() - t0) * 1000, 2)
         AnalyticsService.record_event(
@@ -357,8 +364,6 @@ def download_document(doc_id: str, file_format: str, current_user: Dict[str, Any
     if not artifact:
         raise HTTPException(status_code=404, detail="Document not found.")
     document = _assert_document_access(artifact["document_id"], current_user)
-    target_path, filename = file_manager.get_file(doc_id, file_format)
-    
     media_types = {
         "docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         "pdf": "application/pdf"
@@ -366,20 +371,32 @@ def download_document(doc_id: str, file_format: str, current_user: Dict[str, Any
     media_type = media_types.get(file_format.lower())
     if not media_type:
         raise HTTPException(status_code=404, detail="This document format is not available.")
+    version = document.get("latest_version") or {}
+    stored_path = version.get("pdf_path" if file_format.lower() == "pdf" else "docx_path")
+    if not stored_path:
+        raise HTTPException(status_code=404, detail=f"The generated {file_format.upper()} file is unavailable.")
     try:
+        target_path, temporary = file_manager.materialize(stored_path)
+        if not temporary:
+            target_path = target_path.resolve()
+            if not target_path.is_relative_to(file_manager.base_dir.resolve()) or not target_path.is_file():
+                raise FileNotFoundError
         with target_path.open("rb") as generated_file:
             signature = generated_file.read(5)
-    except OSError:
+    except (OSError, RuntimeError, ValueError):
         raise HTTPException(status_code=404, detail=f"The generated {file_format.upper()} file is unavailable.")
     valid_signature = signature.startswith(b"%PDF-") if file_format.lower() == "pdf" else signature.startswith(b"PK")
     if not valid_signature:
+        if temporary:
+            file_manager.cleanup_materialized(target_path)
         raise HTTPException(status_code=404, detail=f"The generated {file_format.upper()} file is invalid or unavailable.")
-    
+
     return FileResponse(
         path=str(target_path),
-        filename=filename,
+        filename=file_manager.display_filename(stored_path),
         media_type=media_type,
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'}
+        headers={"Content-Disposition": f'attachment; filename="{file_manager.display_filename(stored_path)}"'},
+        background=BackgroundTask(file_manager.cleanup_materialized, target_path) if temporary else None,
     )
 
 class NLPExtractRequest(BaseModel):
@@ -843,11 +860,13 @@ def download_batch_zip(batch_id: str, current_user: Dict[str, Any] = Depends(req
         if ownership["user_id"] != current_user.get("sub") and current_user.get("role") not in {"admin", "reviewer", "approver"}:
             raise HTTPException(status_code=403, detail="You do not have access to this batch archive.")
         zip_p = BatchService.get_batch_zip(batch_id)
+        temporary = file_manager.uses_remote_storage()
         return FileResponse(
             path=str(zip_p),
-            filename=zip_p.name,
+            filename=f"Batch_{batch_id}.zip",
             media_type="application/zip",
-            headers={"Content-Disposition": f'attachment; filename="{zip_p.name}"'}
+            headers={"Content-Disposition": f'attachment; filename="Batch_{batch_id}.zip"'},
+            background=BackgroundTask(file_manager.cleanup_materialized, zip_p) if temporary else None,
         )
     except FileNotFoundError:
         raise HTTPException(status_code=404, detail=f"Batch archive '{batch_id}' not found.")
@@ -898,27 +917,36 @@ def download_current_document_file(
     if not stored_path:
         raise HTTPException(status_code=404, detail=unavailable_detail)
 
-    document_path = Path(stored_path).resolve()
-    storage_root = file_manager.base_dir.resolve()
-    if not document_path.is_relative_to(storage_root) or not document_path.is_file():
-        raise HTTPException(status_code=404, detail=unavailable_detail)
     try:
+        document_path, temporary = file_manager.materialize(stored_path)
+        if not temporary:
+            document_path = document_path.resolve()
+            storage_root = file_manager.base_dir.resolve()
+            if not document_path.is_relative_to(storage_root) or not document_path.is_file():
+                raise FileNotFoundError
         with document_path.open("rb") as document_file:
             signature = document_file.read(5)
             valid = signature.startswith(b"%PDF-") if file_format == "pdf" else signature.startswith(b"PK")
             if not valid:
                 raise HTTPException(status_code=404, detail=f"The stored {file_format.upper()} is invalid or unavailable.")
-    except OSError:
+    except (OSError, RuntimeError, ValueError):
         raise HTTPException(status_code=404, detail=unavailable_detail)
+    if not valid:
+        if temporary:
+            file_manager.cleanup_materialized(document_path)
+        raise HTTPException(status_code=404, detail=f"The stored {file_format.upper()} is invalid or unavailable.")
+
+    filename = file_manager.display_filename(stored_path)
 
     return FileResponse(
         path=str(document_path),
-        filename=document_path.name,
+        filename=filename,
         media_type=(
             "application/pdf" if file_format == "pdf"
             else "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
         ),
-        headers={"Content-Disposition": f'attachment; filename="{document_path.name}"'},
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        background=BackgroundTask(file_manager.cleanup_materialized, document_path) if temporary else None,
     )
 
 @router.post("/{doc_id}/versions/{version_num}/restore")
@@ -1093,7 +1121,18 @@ def update_document_source(
         title = doc["title"]
         
         if doc_type == "exec_meet":
+            if "lead_signature_data" not in new_data:
+                prior_version = DocumentRepository.get_version_detail(doc_id, doc["current_version"])
+                prior_data = (prior_version or {}).get("data", {})
+                new_data = {
+                    **new_data,
+                    "lead_signature_data": prior_data.get("lead_signature_data"),
+                    "lead_signature_confirmed": prior_data.get("lead_signature_confirmed", False),
+                }
             validated = ExecutiveMeetRequest(**new_data)
+            validated.lead_signature_data = normalize_lead_signature(
+                validated.lead_signature_data, validated.lead_signature_confirmed
+            )
             title = validated.event_name
             safe_d = sanitize_filename(validated.event_date.replace("/", "-"))
             docx_p = session_dir / f"Executive_Meet_{safe_d}.docx"
@@ -1270,6 +1309,8 @@ def sign_document_version(
     target_v = version_num or doc["current_version"]
     try:
         return SignatureService.sign_document_version(doc_id, target_v, current_user)
+    except RuntimeError:
+        raise HTTPException(status_code=503, detail="Signature service is unavailable because server signing configuration is incomplete.")
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -1278,7 +1319,10 @@ def verify_document_signature(doc_id: str, version_num: Optional[int] = None, cu
     """Feature 12: Verifies cryptographic signature and detects payload tampering."""
     doc = _assert_document_access(doc_id, current_user)
     target_v = version_num or doc["current_version"]
-    return SignatureService.verify_signature(doc_id, target_v)
+    try:
+        return SignatureService.verify_signature(doc_id, target_v)
+    except RuntimeError:
+        raise HTTPException(status_code=503, detail="Signature service is unavailable because server signing configuration is incomplete.")
 
 # ============================================================
 # FEATURE 13: USAGE ANALYTICS ROUTES

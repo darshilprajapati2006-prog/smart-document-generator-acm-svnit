@@ -5,6 +5,7 @@ Provides tamper detection and cryptographic signature verification.
 Clearly distinguishes cryptographic signatures from plain typed names or signature images.
 """
 import uuid
+import hmac
 from typing import Dict, Any, Optional
 from app.db.database import get_db
 from app.core.security import compute_payload_hash, sign_data_payload
@@ -63,9 +64,9 @@ class SignatureService:
             },
             "algorithm": "HMAC-SHA256",
             "payload_hash": payload_hash,
-            "signature_token": signature_token,
-            "signature_type": "Cryptographic Electronic Digest (HMAC-SHA256)",
-            "message": "Cryptographic signature successfully applied. Any future alteration to source fields will invalidate this signature."
+            "is_signed": True,
+            "verification_status": "Not Verified",
+            "message": "HMAC-SHA256 signature applied to this document version."
         }
 
     @classmethod
@@ -89,6 +90,8 @@ class SignatureService:
                 "is_signed": False,
                 "is_valid": False,
                 "tampered": False,
+                "verification_status": "Not Verified",
+                "algorithm": "HMAC-SHA256",
                 "detail": f"No digital signature found for document '{doc_id}' version {version_num}."
             }
 
@@ -103,17 +106,28 @@ class SignatureService:
 
         current_hash = compute_payload_hash(version_detail["data"])
         recorded_hash = sig_row["payload_hash"]
-        is_intact = (current_hash == recorded_hash)
+        current_signature = sign_data_payload(version_detail["data"], sig_row["signer_id"])
+        hash_matches = hmac.compare_digest(current_hash, recorded_hash)
+        signature_matches = hmac.compare_digest(current_signature, sig_row["signature_token"])
+        is_intact = hash_matches and signature_matches
+        verification_status = "Verified" if is_intact else ("Modified" if not hash_matches else "Invalid")
+        if is_intact:
+            detail = "Signature is VALID and document payload is UNALTERED."
+        elif not hash_matches:
+            detail = "Document payload has been MODIFIED since this version was signed."
+        else:
+            detail = "Stored HMAC signature is INVALID for this document version."
 
         return {
             "is_signed": True,
             "is_valid": is_intact,
             "tampered": not is_intact,
+            "verification_status": verification_status,
             "algorithm": sig_row["algorithm"],
             "signer_name": sig_row["signer_name"],
             "signer_role": sig_row["signer_role"],
             "signed_at": sig_row["created_at"],
             "expected_hash": recorded_hash,
             "computed_hash": current_hash,
-            "detail": "Signature is VALID and document payload is UNALTERED." if is_intact else "INTEGRITY ALERT: Document payload has been ALTERED since signature creation!"
+            "detail": detail
         }

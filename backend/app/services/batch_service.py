@@ -9,6 +9,7 @@ import shutil
 from pathlib import Path
 from typing import Dict, Any, List
 from app.utils.file_manager import file_manager, sanitize_filename
+from app.utils import supabase_storage
 from app.schemas.executive_meet import ExecutiveMeetRequest
 from app.schemas.bill_certificate import BillCertificateRequest
 from app.schemas.bill_summary import BillSummaryRequest
@@ -145,6 +146,10 @@ class BatchService:
             with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zf:
                 for file_p in successful_files:
                     zf.write(file_p, arcname=file_p.name)
+            if supabase_storage.storage_backend() == "supabase":
+                supabase_storage.upload_file(
+                    f"batches/{batch_id}/{zip_filename}", zip_path, "application/zip"
+                )
 
         return {
             "batch_id": batch_id,
@@ -158,8 +163,20 @@ class BatchService:
 
     @classmethod
     def get_batch_zip(cls, batch_id: str) -> Path:
+        if not batch_id or any(ch not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_" for ch in batch_id):
+            raise FileNotFoundError(f"Batch archive for '{batch_id}' not found.")
         batch_folder = BATCH_DIR / batch_id
         zip_path = batch_folder / f"Batch_{batch_id}.zip"
+        if supabase_storage.storage_backend() == "supabase":
+            from app.utils.file_manager import file_manager
+            reference = supabase_storage.storage_reference(
+                f"batches/{batch_id}/Batch_{batch_id}.zip", "application/zip"
+            )
+            try:
+                materialized, _ = file_manager.materialize(reference)
+                return materialized
+            except RuntimeError as exc:
+                raise FileNotFoundError(f"Batch archive for '{batch_id}' not found.") from exc
         if not zip_path.exists():
             raise FileNotFoundError(f"Batch archive for '{batch_id}' not found.")
         return zip_path

@@ -13,11 +13,17 @@ from typing import Optional, Dict, Any
 from fastapi import HTTPException, Security, Depends
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 
-SECRET_KEY = os.environ.get("JWT_SECRET_KEY") or os.environ.get("SECRET_KEY") or "acm-svnit-smart-document-generator-secure-secret-key-2026"
+SECRET_KEY = os.environ.get("JWT_SECRET_KEY") or os.environ.get("SECRET_KEY")
 ALGORITHM = "PBKDF2-HMAC-SHA256"
 SALT_BYTES = 16
 HASH_ITERATIONS = 100_000
 TOKEN_EXPIRY_SECONDS = 86400 * 7 # 7 days
+
+
+def _secret_key_bytes() -> bytes:
+    if not SECRET_KEY or len(SECRET_KEY) < 32:
+        raise RuntimeError("Configure JWT_SECRET_KEY or SECRET_KEY with at least 32 characters.")
+    return SECRET_KEY.encode("utf-8")
 
 security_bearer = HTTPBearer(auto_error=False)
 
@@ -63,7 +69,7 @@ def create_access_token(user_id: str, email: str, role: str, full_name: str) -> 
     payload_b64 = base64.urlsafe_b64encode(payload_json).decode('utf-8').rstrip('=')
     
     signature = hmac.new(
-        SECRET_KEY.encode('utf-8'),
+        _secret_key_bytes(),
         payload_b64.encode('utf-8'),
         hashlib.sha256
     ).digest()
@@ -81,7 +87,7 @@ def decode_access_token(token: str) -> Optional[Dict[str, Any]]:
         
         # Verify HMAC signature
         expected_sig = hmac.new(
-            SECRET_KEY.encode('utf-8'),
+            _secret_key_bytes(),
             payload_b64.encode('utf-8'),
             hashlib.sha256
         ).digest()
@@ -111,7 +117,7 @@ def sign_data_payload(data: Dict[str, Any], signer_id: str) -> str:
     """Signs canonical document payload using HMAC-SHA256 with signer salt."""
     p_hash = compute_payload_hash(data)
     to_sign = f"{signer_id}:{p_hash}".encode('utf-8')
-    return hmac.new(SECRET_KEY.encode('utf-8'), to_sign, hashlib.sha256).hexdigest()
+    return hmac.new(_secret_key_bytes(), to_sign, hashlib.sha256).hexdigest()
 
 def is_allowlisted_admin(email: Optional[str]) -> bool:
     """Only the configured one-time bootstrap identity can hold System Admin access."""

@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import "./App.css";
 import { translations } from "./i18n/translations";
+import { clearLeadSignatureState, createLeadSignatureState, hasLeadSignaturePreview, validateLeadSignatureFile } from "./utils/leadSignature.js";
 import BatchGenerator from "./components/BatchGenerator";
 import VersionWorkflowPanel from "./components/VersionWorkflowPanel";
 import TemplateEditorPanel from "./components/TemplateEditorPanel";
@@ -23,7 +24,6 @@ import {
   fetchCurrentUserProfile,
   exportToGoogleDrive,
   distributeByEmail,
-  signDocument,
   downloadGeneratedFile,
 } from "./services/documentApi";
 
@@ -337,6 +337,8 @@ export default function App() {
 
   // Isolated Form States
   const [execData, setExecData] = useState(emptyExecState);
+  const [leadSignature, setLeadSignature] = useState(() => clearLeadSignatureState());
+  const leadSignatureInputRef = useRef(null);
   const [billCertData, setBillCertData] = useState(emptyBillCertState);
   const [billSummaryData, setBillSummaryData] = useState(emptyBillSummaryState);
   const [prizeMoneyData, setPrizeMoneyData] = useState(emptyPrizeMoneyState);
@@ -1058,6 +1060,11 @@ export default function App() {
     try {
       let result;
       if (selectedType === "exec_meet") {
+        if (leadSignature.data && !leadSignature.confirmed) {
+          setError("Confirm that this is your signature and authorize its use before generating the document.");
+          setIsGenerating(false);
+          return;
+        }
         const missing = permissionRequiredFields.filter(([key]) => !String(execData[key] ?? "").trim()).map(([, label]) => label);
         if (missing.length > 0) {
           setError(`Cannot generate document. Missing required fields: ${missing.join(", ")}. Please complete them in the form.`);
@@ -1067,6 +1074,8 @@ export default function App() {
 
         result = await generateExecutiveMeet({
           ...execData,
+          lead_signature_data: leadSignature.confirmed ? leadSignature.data : null,
+          lead_signature_confirmed: leadSignature.confirmed,
           date: execData.date.trim(),
           ref_no: execData.ref_no.trim(),
           submitted_to: execData.submitted_to.trim(),
@@ -1142,8 +1151,8 @@ export default function App() {
       }
 
       setGeneratedResult(result);
-      if (result.document_id) {
-        setSelectedDocIdForHistory(result.document_id);
+      if (result.repository_id || result.document_id) {
+        setSelectedDocIdForHistory(result.repository_id || result.document_id);
       }
     } catch (err) {
       setError(`Document generation failed: ${err.message}`);
@@ -1228,25 +1237,6 @@ export default function App() {
       setEmailModalOpen(false);
     } catch (err) {
       setActionStatus({ type: "error", message: `Email failed: ${err.message}` });
-    }
-  }
-
-  // EXTERNAL INTEGRATIONS: Cryptographic Digital Signature
-  async function handleSignDoc() {
-    if (!generatedResult?.document_id) return;
-    setActionStatus({ type: "info", message: "Generating digital cryptographic signature..." });
-    try {
-      const res = await signDocument({
-        document_id: generatedResult.document_id,
-        signer_name: "Dr. Sankita J. Patel",
-        signer_role: "Faculty Chairman, ACM",
-      });
-      setActionStatus({
-        type: "success",
-        message: `Cryptographically Signed! Algorithm: ${res.algorithm}, Digest: ${res.signature?.substring(0, 16)}... Status: ${res.status}`,
-      });
-    } catch (err) {
-      setActionStatus({ type: "error", message: `Signing failed: ${err.message}` });
     }
   }
 
@@ -2047,6 +2037,46 @@ export default function App() {
                           <span>Student Branch *</span>
                           <input type="text" maxLength={120} value={execData.lead_branch} onChange={(e) => setExecData({ ...execData, lead_branch: e.target.value })} />
                         </label>
+                        <section className="lead-signature-upload" aria-labelledby="lead-signature-title">
+                          <div>
+                            <h4 id="lead-signature-title">Student Lead Signature</h4>
+                            <p>Upload a PNG or JPEG image to place in the student lead signature area.</p>
+                          </div>
+                          <input
+                            ref={leadSignatureInputRef}
+                            className="visually-hidden"
+                            type="file"
+                            accept="image/png,image/jpeg,.png,.jpg,.jpeg"
+                            onChange={(event) => {
+                              const file = event.target.files?.[0];
+                              event.target.value = "";
+                              if (!file) return;
+                              const fileError = validateLeadSignatureFile(file);
+                              if (fileError) {
+                                setLeadSignature(clearLeadSignatureState(fileError));
+                                return;
+                              }
+                              const reader = new FileReader();
+                              reader.onload = () => setLeadSignature(createLeadSignatureState(String(reader.result || ""), file.name));
+                              reader.onerror = () => setLeadSignature(clearLeadSignatureState("Unable to read this image. Please try another file."));
+                              reader.readAsDataURL(file);
+                            }}
+                          />
+                          {hasLeadSignaturePreview(leadSignature) ? (
+                            <div className="lead-signature-preview-wrap">
+                              <img className="lead-signature-preview" src={leadSignature.data} alt="Uploaded student lead signature preview" />
+                              <span className="lead-signature-filename">{leadSignature.fileName}</span>
+                            </div>
+                          ) : (
+                            <div className="lead-signature-empty">No signature image uploaded</div>
+                          )}
+                          <div className="lead-signature-actions">
+                            <button type="button" className="secondary-btn" onClick={() => leadSignatureInputRef.current?.click()}>{leadSignature.data ? "Replace Signature" : "Upload Signature"}</button>
+                            {hasLeadSignaturePreview(leadSignature) && <button type="button" className="secondary-btn" onClick={() => setLeadSignature(clearLeadSignatureState())}>Remove Signature</button>}
+                          </div>
+                          {leadSignature.data && <label className="lead-signature-confirm"><input type="checkbox" checked={leadSignature.confirmed} onChange={(event) => setLeadSignature((previous) => ({ ...previous, confirmed: event.target.checked }))} /> <span>I confirm this is my signature and authorize its use in this document.</span></label>}
+                          {leadSignature.error && <p className="lead-signature-error" role="alert">{leadSignature.error}</p>}
+                        </section>
                         <label className="field">
                           <span>Technical Assistant Name *</span>
                           <input type="text" maxLength={160} value={execData.tech_assist_name} onChange={(e) => setExecData({ ...execData, tech_assist_name: e.target.value })} />
@@ -2724,19 +2754,15 @@ export default function App() {
                         <h4>✉️ Distribute by Email</h4>
                         <p>Send attachment securely to authorized stakeholders</p>
                       </div>
-                      <div className="action-card" onClick={handleSignDoc}>
-                        <h4>✍️ Cryptographically Sign</h4>
-                        <p>Apply HMAC-SHA256 institutional digital seal</p>
-                      </div>
                       <div
                         className="action-card"
                         onClick={() => {
-                          setSelectedDocIdForHistory(generatedResult.document_id);
+                          setSelectedDocIdForHistory(generatedResult.repository_id || generatedResult.document_id);
                           setActiveTab("history");
                         }}
                       >
-                        <h4>⏳ Versions & Approval</h4>
-                        <p>View audit trail, revisions, and approval workflow</p>
+                        <h4>⏳ Signatures, Versions & Approval</h4>
+                        <p>Verify signatures, review audit history, and manage approval workflow</p>
                       </div>
                     </div>
                   </div>

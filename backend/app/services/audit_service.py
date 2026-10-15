@@ -7,12 +7,11 @@ import json
 import logging
 from typing import Optional, Dict, Any
 from datetime import datetime, timezone
-import sqlite3
 
 logger = logging.getLogger(__name__)
 
 def record_audit_log(
-    conn: sqlite3.Connection,
+    conn: Any,
     action: str,
     actor_id: Optional[str] = None,
     actor_email: Optional[str] = None,
@@ -20,7 +19,7 @@ def record_audit_log(
     details: Optional[Dict[str, Any]] = None,
     ip_address: Optional[str] = None
 ) -> str:
-    """Inserts a structured audit log entry into the SQLite audit_logs table."""
+    """Inserts a structured audit log entry into the active audit_logs table."""
     log_id = f"aud-{uuid.uuid4().hex[:12]}"
     now = datetime.now(timezone.utc).isoformat()
     details_str = json.dumps(details or {})
