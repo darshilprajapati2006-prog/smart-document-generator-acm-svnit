@@ -31,6 +31,14 @@ def test_storage_reference_round_trips_escaped_names(monkeypatch):
     )
 
 
+def test_storage_config_rejects_non_origin_project_url_without_echoing_value(monkeypatch):
+    configure_storage(monkeypatch)
+    monkeypatch.setenv("SUPABASE_URL", "https://example.supabase.co/storage/v1")
+    with pytest.raises(RuntimeError, match="project origin") as error:
+        storage.verify_storage_configuration()
+    assert "example.supabase.co" not in str(error.value)
+
+
 def test_upload_uses_private_storage_endpoint_and_upsert(monkeypatch):
     configure_storage(monkeypatch)
     requests = []
@@ -64,6 +72,39 @@ def test_signature_externalize_and_hydrate_keeps_existing_data_contract(monkeypa
     assert hydrated["title"] == "same"
 
 
+def test_file_manager_persists_version_assets_and_materializes_private_download(monkeypatch, tmp_path):
+    from app.utils.file_manager import FileManager
+
+    configure_storage(monkeypatch)
+    manager = FileManager(base_dir=tmp_path / "storage")
+    docx = tmp_path / "generated.docx"
+    pdf = tmp_path / "generated.pdf"
+    docx.write_bytes(b"PK generated docx")
+    pdf.write_bytes(b"%PDF-generated pdf")
+    uploaded = []
+
+    def capture_upload(key, path, content_type):
+        uploaded.append((key, path.read_bytes(), content_type))
+
+    monkeypatch.setattr(storage, "upload_file", capture_upload)
+    data, stored_docx, stored_pdf = manager.persist_version_assets(
+        "document-1", 2, {"title": "persisted"}, str(docx), str(pdf)
+    )
+    assert data["title"] == "persisted"
+    assert stored_docx.startswith("supabase-storage://smartdocs-private/documents/document-1/versions/2/")
+    assert stored_pdf.startswith("supabase-storage://smartdocs-private/documents/document-1/versions/2/")
+    assert [item[1] for item in uploaded] == [b"PK generated docx", b"%PDF-generated pdf"]
+
+    monkeypatch.setattr(storage, "download_bytes", lambda _reference: (b"%PDF-durable", "application/pdf"))
+    materialized, temporary = manager.materialize(stored_pdf)
+    try:
+        assert temporary is True
+        assert materialized.read_bytes() == b"%PDF-durable"
+    finally:
+        manager.cleanup_materialized(materialized)
+    assert not materialized.exists()
+
+
 def test_render_refuses_local_storage(monkeypatch):
     monkeypatch.setenv("RENDER", "true")
     monkeypatch.setenv("SMARTDOCS_STORAGE_BACKEND", "local")
@@ -73,8 +114,10 @@ def test_render_refuses_local_storage(monkeypatch):
 
 def test_startup_verification_requires_private_bucket_and_deny_policy(monkeypatch):
     configure_storage(monkeypatch)
+    requests = []
 
     def handler(request):
+        requests.append(request)
         return httpx.Response(200, json={"id": "smartdocs-private", "public": False})
 
     client_type = httpx.Client
@@ -101,6 +144,59 @@ def test_startup_verification_requires_private_bucket_and_deny_policy(monkeypatc
     from app.db import database
     monkeypatch.setattr(database, "get_db", lambda: Context())
     storage.verify_storage_configuration()
+    assert requests[0].method == "GET"
+    assert requests[0].url.path == "/storage/v1/bucket/smartdocs-private"
+    assert requests[0].headers["apikey"] == "sb_secret_test-key"
+    assert "authorization" not in requests[0].headers
+
+
+@pytest.mark.parametrize(("status", "message"), [
+    (401, "rejected the backend API key"),
+    (403, "denied bucket verification"),
+    (404, "bucket was not found"),
+    (503, "HTTP 503"),
+])
+def test_startup_verification_reports_safe_http_failure_category(monkeypatch, status, message):
+    configure_storage(monkeypatch, key="sb_secret_do-not-leak-this-key")
+    client_type = httpx.Client
+    monkeypatch.setattr(storage.httpx, "Client", lambda **kwargs: client_type(
+        transport=httpx.MockTransport(lambda _request: httpx.Response(status, text="sensitive upstream body")),
+        **kwargs,
+    ))
+
+    with pytest.raises(RuntimeError, match=message) as error:
+        storage.verify_storage_configuration()
+    assert "do-not-leak-this-key" not in str(error.value)
+    assert "sensitive upstream body" not in str(error.value)
+
+
+def test_startup_verification_reports_network_failure_without_request_details(monkeypatch):
+    configure_storage(monkeypatch, key="sb_secret_do-not-leak-this-key")
+
+    def handler(request):
+        raise httpx.ConnectError("secret-do-not-echo", request=request)
+
+    client_type = httpx.Client
+    monkeypatch.setattr(storage.httpx, "Client", lambda **kwargs: client_type(
+        transport=httpx.MockTransport(handler), **kwargs,
+    ))
+    with pytest.raises(RuntimeError, match=r"could not be reached \(ConnectError\)") as error:
+        storage.verify_storage_configuration()
+    assert "do-not-leak-this-key" not in str(error.value)
+    assert "secret-do-not-echo" not in str(error.value)
+
+
+def test_startup_verification_reports_invalid_json_safely(monkeypatch):
+    configure_storage(monkeypatch, key="sb_secret_do-not-leak-this-key")
+    client_type = httpx.Client
+    monkeypatch.setattr(storage.httpx, "Client", lambda **kwargs: client_type(
+        transport=httpx.MockTransport(lambda _request: httpx.Response(200, text="upstream-secret-body")),
+        **kwargs,
+    ))
+    with pytest.raises(RuntimeError, match="invalid response") as error:
+        storage.verify_storage_configuration()
+    assert "do-not-leak-this-key" not in str(error.value)
+    assert "upstream-secret-body" not in str(error.value)
 
 
 @pytest.mark.parametrize("bucket_info", [

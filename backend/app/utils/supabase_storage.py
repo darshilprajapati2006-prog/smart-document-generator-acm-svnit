@@ -30,8 +30,17 @@ def storage_config() -> tuple[str, str, str]:
     bucket = os.getenv("SUPABASE_STORAGE_BUCKET", "smartdocs-private").strip()
     if not url or not key or not bucket:
         raise RuntimeError("Supabase Storage requires SUPABASE_URL, SUPABASE_SECRET_KEY (or legacy SUPABASE_SERVICE_ROLE_KEY), and SUPABASE_STORAGE_BUCKET.")
-    if not url.startswith("https://"):
-        raise RuntimeError("SUPABASE_URL must use HTTPS.")
+    parsed_url = urlsplit(url)
+    if (
+        parsed_url.scheme != "https"
+        or not parsed_url.hostname
+        or parsed_url.username
+        or parsed_url.password
+        or parsed_url.path not in {"", "/"}
+        or parsed_url.query
+        or parsed_url.fragment
+    ):
+        raise RuntimeError("SUPABASE_URL must be the HTTPS project origin, without credentials, a path, query, or fragment.")
     if bucket != "smartdocs-private":
         raise RuntimeError("SUPABASE_STORAGE_BUCKET must be 'smartdocs-private' to match the provisioned private-bucket policy.")
     return url, key, bucket
@@ -48,13 +57,28 @@ def verify_storage_configuration() -> None:
             headers=_auth_headers(key),
         ) as client:
             response = client.get(f"{url}/storage/v1/bucket/{quote(bucket, safe='')}")
-            response.raise_for_status()
-            bucket_info = response.json()
-    except (httpx.HTTPError, ValueError) as exc:
-        status = getattr(getattr(exc, "response", None), "status_code", None)
-        suffix = f" (HTTP {status})" if status else ""
-        raise RuntimeError(f"Could not verify the Supabase Storage bucket{suffix}.") from exc
-    if bucket_info.get("id") != bucket or bucket_info.get("public") is not False:
+    except httpx.TimeoutException as exc:
+        raise RuntimeError("Supabase Storage verification timed out; check Render outbound connectivity and Supabase availability.") from exc
+    except httpx.InvalidURL as exc:
+        raise RuntimeError("Supabase Storage verification URL is invalid; set SUPABASE_URL to the project origin.") from exc
+    except httpx.RequestError as exc:
+        raise RuntimeError(f"Supabase Storage could not be reached ({type(exc).__name__}); check the project URL and outbound network access.") from exc
+
+    if response.status_code == 401:
+        raise RuntimeError("Supabase Storage rejected the backend API key (HTTP 401); verify SUPABASE_SECRET_KEY in Render.")
+    if response.status_code == 403:
+        raise RuntimeError("Supabase Storage denied bucket verification (HTTP 403); verify the backend key has Storage admin access.")
+    if response.status_code == 404:
+        raise RuntimeError("Supabase Storage bucket was not found (HTTP 404); verify the project URL and smartdocs-private bucket name.")
+    if response.is_error:
+        raise RuntimeError(f"Supabase Storage bucket verification failed (HTTP {response.status_code}); check Supabase service status and configuration.")
+    try:
+        bucket_info = response.json()
+    except ValueError as exc:
+        raise RuntimeError("Supabase Storage returned an invalid response while verifying the bucket; check Supabase service status.") from exc
+    if not isinstance(bucket_info, dict) or bucket_info.get("id") != bucket:
+        raise RuntimeError("Supabase Storage returned unexpected bucket details; verify the project URL and smartdocs-private bucket name.")
+    if bucket_info.get("public") is not False:
         raise RuntimeError("The configured Supabase Storage bucket must be private.")
 
     # The backend service key bypasses RLS; the restrictive policy separately

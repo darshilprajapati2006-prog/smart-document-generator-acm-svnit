@@ -147,6 +147,20 @@ def test_migration_runner_does_not_execute_prose_after_semicolon_in_sql_comment(
     assert any("INSERT INTO smartdocs_schema_migrations" in sql for sql in connection.statements)
 
 
+def test_migration_sql_splitter_ignores_semicolons_in_comments_and_quoted_strings():
+    from app.db.migrations import _split_sql_statements
+
+    statements = _split_sql_statements(
+        "-- prose; remains a comment\n"
+        "CREATE TABLE sample (value TEXT DEFAULT 'first; second');"
+        "/* block; comment */ INSERT INTO sample VALUES ($tag$third; fourth$tag$);"
+    )
+    assert len(statements) == 2
+    assert "prose; remains a comment" in statements[0]
+    assert "'first; second'" in statements[0]
+    assert "$tag$third; fourth$tag$" in statements[1]
+
+
 def test_explicit_seed_never_overwrites_existing_user_records():
     from app.db.database import get_db
     from app.db.seed import seed_database
