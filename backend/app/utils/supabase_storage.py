@@ -5,6 +5,8 @@ import base64
 import binascii
 import os
 import re
+import socket
+import ssl
 from pathlib import Path
 from urllib.parse import quote, urlencode, urlsplit
 
@@ -25,12 +27,17 @@ def storage_backend() -> str:
 
 
 def storage_config() -> tuple[str, str, str]:
-    url = os.getenv("SUPABASE_URL", "").strip().rstrip("/")
+    raw_url = os.getenv("SUPABASE_URL", "").strip()
     key = (os.getenv("SUPABASE_SECRET_KEY") or os.getenv("SUPABASE_SERVICE_ROLE_KEY") or "").strip()
     bucket = os.getenv("SUPABASE_STORAGE_BUCKET", "smartdocs-private").strip()
-    if not url or not key or not bucket:
+    if not raw_url or not key or not bucket:
         raise RuntimeError("Supabase Storage requires SUPABASE_URL, SUPABASE_SECRET_KEY (or legacy SUPABASE_SERVICE_ROLE_KEY), and SUPABASE_STORAGE_BUCKET.")
-    parsed_url = urlsplit(url)
+
+    try:
+        parsed_url = urlsplit(raw_url)
+        port = parsed_url.port
+    except ValueError:
+        raise RuntimeError("SUPABASE_URL is malformed; set it to the HTTPS Supabase project origin.") from None
     if (
         parsed_url.scheme != "https"
         or not parsed_url.hostname
@@ -39,11 +46,39 @@ def storage_config() -> tuple[str, str, str]:
         or parsed_url.path not in {"", "/"}
         or parsed_url.query
         or parsed_url.fragment
+        or port not in {None, 443}
     ):
-        raise RuntimeError("SUPABASE_URL must be the HTTPS project origin, without credentials, a path, query, or fragment.")
+        raise RuntimeError("SUPABASE_URL must be the HTTPS project origin on port 443, without credentials, a path, query, or fragment.")
     if bucket != "smartdocs-private":
         raise RuntimeError("SUPABASE_STORAGE_BUCKET must be 'smartdocs-private' to match the provisioned private-bucket policy.")
-    return url, key, bucket
+    hostname = parsed_url.hostname.lower()
+    if ":" in hostname and not hostname.startswith("["):
+        hostname = f"[{hostname}]"
+    # Canonical root origin: env whitespace, host casing and a trailing slash
+    # cannot introduce duplicate /storage/v1 path segments.
+    return f"https://{hostname}", key, bucket
+
+
+def _connect_failure_category(exc: BaseException) -> str:
+    """Classify nested network causes without exposing their messages or URLs."""
+    pending = [exc]
+    visited: set[int] = set()
+    while pending:
+        current = pending.pop()
+        if id(current) in visited:
+            continue
+        visited.add(id(current))
+        if isinstance(current, socket.gaierror):
+            return "dns"
+        if isinstance(current, ssl.SSLError):
+            return "tls"
+        if isinstance(current, httpx.ProxyError):
+            return "proxy"
+        if current.__cause__ is not None:
+            pending.append(current.__cause__)
+        if current.__context__ is not None:
+            pending.append(current.__context__)
+    return "connection"
 
 
 def verify_storage_configuration() -> None:
@@ -55,14 +90,24 @@ def verify_storage_configuration() -> None:
         with httpx.Client(
             timeout=httpx.Timeout(15.0, connect=5.0),
             headers=_auth_headers(key),
+            trust_env=False,
         ) as client:
             response = client.get(f"{url}/storage/v1/bucket/{quote(bucket, safe='')}")
     except httpx.TimeoutException as exc:
-        raise RuntimeError("Supabase Storage verification timed out; check Render outbound connectivity and Supabase availability.") from exc
+        raise RuntimeError("Supabase Storage verification timed out; check Render outbound connectivity and Supabase availability.") from None
     except httpx.InvalidURL as exc:
-        raise RuntimeError("Supabase Storage verification URL is invalid; set SUPABASE_URL to the project origin.") from exc
+        raise RuntimeError("Supabase Storage verification URL is invalid; set SUPABASE_URL to the project origin.") from None
     except httpx.RequestError as exc:
-        raise RuntimeError(f"Supabase Storage could not be reached ({type(exc).__name__}); check the project URL and outbound network access.") from exc
+        category = _connect_failure_category(exc)
+        if category == "dns":
+            message = "Supabase Storage DNS resolution failed; check the SUPABASE_URL hostname and Render DNS/outbound access."
+        elif category == "tls":
+            message = "Supabase Storage TLS verification failed; check the project origin and certificate chain. TLS verification remains enabled."
+        elif category == "proxy":
+            message = "Supabase Storage proxy connection failed; configure direct outbound access from Render."
+        else:
+            message = "Supabase Storage connection failed; check the project origin, port 443, and Render outbound access."
+        raise RuntimeError(message) from None
 
     if response.status_code == 401:
         raise RuntimeError("Supabase Storage rejected the backend API key (HTTP 401); verify SUPABASE_SECRET_KEY in Render.")
@@ -156,6 +201,7 @@ def _client() -> httpx.Client:
     return httpx.Client(
         timeout=httpx.Timeout(90.0, connect=10.0),
         headers=_auth_headers(key),
+        trust_env=False,
     )
 
 

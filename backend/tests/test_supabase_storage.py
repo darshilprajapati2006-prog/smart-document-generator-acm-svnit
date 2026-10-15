@@ -1,4 +1,6 @@
 import base64
+import socket
+import ssl
 import httpx
 import pytest
 
@@ -39,6 +41,29 @@ def test_storage_config_rejects_non_origin_project_url_without_echoing_value(mon
     assert "example.supabase.co" not in str(error.value)
 
 
+@pytest.mark.parametrize("bad_url", [
+    "https://supabase.com/dashboard/project/example",
+    "postgresql://user:password@db.example.supabase.co:5432/postgres",
+    "https://example.supabase.co/storage/v1",
+    "https://example.supabase.co:5432",
+])
+def test_storage_config_rejects_dashboard_database_storage_or_wrong_port(monkeypatch, bad_url):
+    configure_storage(monkeypatch)
+    monkeypatch.setenv("SUPABASE_URL", bad_url)
+    with pytest.raises(RuntimeError, match="SUPABASE_URL") as error:
+        storage.verify_storage_configuration()
+    assert "password" not in str(error.value)
+    assert "example.supabase.co" not in str(error.value)
+
+
+def test_storage_config_trims_whitespace_and_normalizes_root_origin(monkeypatch):
+    configure_storage(monkeypatch, key="  sb_secret_example  ")
+    monkeypatch.setenv("SUPABASE_URL", "  HTTPS://EXAMPLE.SUPABASE.CO:443/  ")
+    assert storage.storage_config() == (
+        "https://example.supabase.co", "sb_secret_example", "smartdocs-private"
+    )
+
+
 def test_upload_uses_private_storage_endpoint_and_upsert(monkeypatch):
     configure_storage(monkeypatch)
     requests = []
@@ -56,6 +81,21 @@ def test_upload_uses_private_storage_endpoint_and_upsert(monkeypatch):
     assert "authorization" not in request.headers
     assert request.headers["x-upsert"] == "true"
     assert request.content == b"png"
+
+
+def test_storage_object_client_does_not_use_ambient_proxy_or_ca_environment(monkeypatch):
+    configure_storage(monkeypatch)
+    options = {}
+    client_type = httpx.Client
+
+    def make_client(**kwargs):
+        options.update(kwargs)
+        return client_type(transport=httpx.MockTransport(lambda _request: httpx.Response(200)), **kwargs)
+
+    monkeypatch.setattr(storage.httpx, "Client", make_client)
+    client = storage._client()
+    client.close()
+    assert options["trust_env"] is False
 
 
 def test_signature_externalize_and_hydrate_keeps_existing_data_contract(monkeypatch):
@@ -121,7 +161,13 @@ def test_startup_verification_requires_private_bucket_and_deny_policy(monkeypatc
         return httpx.Response(200, json={"id": "smartdocs-private", "public": False})
 
     client_type = httpx.Client
-    monkeypatch.setattr(storage.httpx, "Client", lambda **kwargs: client_type(transport=httpx.MockTransport(handler), **kwargs))
+    client_options = []
+
+    def make_client(**kwargs):
+        client_options.append(kwargs)
+        return client_type(transport=httpx.MockTransport(handler), **kwargs)
+
+    monkeypatch.setattr(storage.httpx, "Client", make_client)
 
     class Result:
         def fetchone(self):
@@ -148,6 +194,7 @@ def test_startup_verification_requires_private_bucket_and_deny_policy(monkeypatc
     assert requests[0].url.path == "/storage/v1/bucket/smartdocs-private"
     assert requests[0].headers["apikey"] == "sb_secret_test-key"
     assert "authorization" not in requests[0].headers
+    assert client_options[0]["trust_env"] is False
 
 
 @pytest.mark.parametrize(("status", "message"), [
@@ -180,10 +227,52 @@ def test_startup_verification_reports_network_failure_without_request_details(mo
     monkeypatch.setattr(storage.httpx, "Client", lambda **kwargs: client_type(
         transport=httpx.MockTransport(handler), **kwargs,
     ))
-    with pytest.raises(RuntimeError, match=r"could not be reached \(ConnectError\)") as error:
+    with pytest.raises(RuntimeError, match="connection failed") as error:
         storage.verify_storage_configuration()
     assert "do-not-leak-this-key" not in str(error.value)
     assert "secret-do-not-echo" not in str(error.value)
+
+
+@pytest.mark.parametrize(("cause", "expected"), [
+    (socket.gaierror(-2, "dns-secret"), "DNS resolution failed"),
+    (ssl.SSLCertVerificationError("tls-secret"), "TLS verification failed"),
+])
+def test_startup_verification_classifies_nested_dns_and_tls_failures_safely(monkeypatch, cause, expected):
+    configure_storage(monkeypatch, key="sb_secret_do-not-leak-this-key")
+
+    def handler(request):
+        try:
+            raise cause
+        except Exception as underlying:
+            raise httpx.ConnectError("transport-secret", request=request) from underlying
+
+    client_type = httpx.Client
+    monkeypatch.setattr(storage.httpx, "Client", lambda **kwargs: client_type(
+        transport=httpx.MockTransport(handler), **kwargs,
+    ))
+    with pytest.raises(RuntimeError, match=expected) as error:
+        storage.verify_storage_configuration()
+    message = str(error.value)
+    assert "do-not-leak-this-key" not in message
+    assert "dns-secret" not in message
+    assert "tls-secret" not in message
+    assert "transport-secret" not in message
+
+
+def test_startup_verification_reports_timeout_as_its_own_category(monkeypatch):
+    configure_storage(monkeypatch, key="sb_secret_do-not-leak-this-key")
+
+    def handler(request):
+        raise httpx.ConnectTimeout("timeout-secret", request=request)
+
+    client_type = httpx.Client
+    monkeypatch.setattr(storage.httpx, "Client", lambda **kwargs: client_type(
+        transport=httpx.MockTransport(handler), **kwargs,
+    ))
+    with pytest.raises(RuntimeError, match="timed out") as error:
+        storage.verify_storage_configuration()
+    assert "do-not-leak-this-key" not in str(error.value)
+    assert "timeout-secret" not in str(error.value)
 
 
 def test_startup_verification_reports_invalid_json_safely(monkeypatch):
