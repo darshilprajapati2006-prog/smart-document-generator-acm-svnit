@@ -100,6 +100,53 @@ def test_migration_runner_refuses_untracked_existing_application_tables(monkeypa
     assert not any("CREATE TABLE IF NOT EXISTS users" in sql for sql in connection.statements)
 
 
+def test_migration_runner_does_not_execute_prose_after_semicolon_in_sql_comment(monkeypatch, tmp_path):
+    from app.db import migrations
+
+    migration_dir = tmp_path / "versions"
+    migration_dir.mkdir()
+    (migration_dir / "0001_initial_schema.sql").write_text(
+        "-- Initial schema. Additive creation only; no data is reset or dropped.\n"
+        "CREATE TABLE IF NOT EXISTS users (id TEXT PRIMARY KEY);\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(migrations, "VERSIONS", migration_dir)
+
+    class Result:
+        def __init__(self, one=None, many=None):
+            self._one, self._many = one, many or []
+        def fetchone(self): return self._one
+        def fetchall(self): return self._many
+
+    class Connection:
+        def __init__(self): self.statements = []
+        def execute(self, sql, params=()):
+            self.statements.append(sql)
+            if "information_schema.tables" in sql and "table_name='smartdocs_schema_migrations'" in sql:
+                return Result()
+            if "information_schema.tables" in sql:
+                return Result(many=[])
+            if sql == "SELECT version, checksum FROM smartdocs_schema_migrations":
+                return Result(many=[])
+            return Result()
+
+    connection = Connection()
+    class Context:
+        def __enter__(self): return connection
+        def __exit__(self, *_): return False
+
+    monkeypatch.setattr(migrations, "get_db", lambda: Context())
+    migrations.run_migrations()
+
+    executed_migration_sql = [
+        sql for sql in connection.statements if "CREATE TABLE IF NOT EXISTS users" in sql
+    ]
+    assert len(executed_migration_sql) == 1
+    assert "no data is reset or dropped." in executed_migration_sql[0]  # retained only as a SQL comment
+    assert not any(sql.strip().lower().startswith("no data is reset or dropped") for sql in connection.statements)
+    assert any("INSERT INTO smartdocs_schema_migrations" in sql for sql in connection.statements)
+
+
 def test_explicit_seed_never_overwrites_existing_user_records():
     from app.db.database import get_db
     from app.db.seed import seed_database

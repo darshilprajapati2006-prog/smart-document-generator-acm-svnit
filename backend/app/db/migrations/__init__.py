@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import hashlib
 from pathlib import Path
+import re
 
 from app.db.database import get_db
 
@@ -14,6 +15,93 @@ APP_TABLES = {
     "template_configs", "analytics_events", "digital_signatures",
     "email_distribution_logs",
 }
+
+
+def _split_sql_statements(sql: str) -> list[str]:
+    """Split PostgreSQL SQL at statement terminators, ignoring comments/strings.
+
+    In particular, semicolons in line comments must not terminate a statement:
+    doing a plain ``sql.split(';')`` can turn the rest of an explanatory
+    comment into invalid SQL.
+    """
+    statements: list[str] = []
+    current: list[str] = []
+    i = 0
+    state = "normal"
+    block_depth = 0
+    dollar_tag: str | None = None
+
+    while i < len(sql):
+        if state == "normal":
+            if sql.startswith("--", i):
+                current.append("--")
+                state = "line_comment"
+                i += 2
+                continue
+            if sql.startswith("/*", i):
+                current.append("/*")
+                state = "block_comment"
+                block_depth = 1
+                i += 2
+                continue
+            if sql[i] == "'":
+                current.append(sql[i]); state = "single_quote"; i += 1; continue
+            if sql[i] == '"':
+                current.append(sql[i]); state = "double_quote"; i += 1; continue
+            if sql[i] == "$":
+                match = re.match(r"\$(?:[A-Za-z_][A-Za-z0-9_]*)?\$", sql[i:])
+                if match:
+                    dollar_tag = match.group(0)
+                    current.append(dollar_tag)
+                    state = "dollar_quote"
+                    i += len(dollar_tag)
+                    continue
+            if sql[i] == ";":
+                statement = "".join(current).strip()
+                if statement:
+                    statements.append(statement)
+                current = []
+                i += 1
+                continue
+            current.append(sql[i]); i += 1; continue
+
+        if state == "line_comment":
+            current.append(sql[i])
+            if sql[i] == "\n":
+                state = "normal"
+            i += 1
+            continue
+        if state == "block_comment":
+            if sql.startswith("/*", i):
+                current.append("/*"); block_depth += 1; i += 2; continue
+            if sql.startswith("*/", i):
+                current.append("*/"); block_depth -= 1; i += 2
+                if block_depth == 0:
+                    state = "normal"
+                continue
+            current.append(sql[i]); i += 1; continue
+        if state in {"single_quote", "double_quote"}:
+            quote = "'" if state == "single_quote" else '"'
+            current.append(sql[i])
+            if sql[i] == quote:
+                if i + 1 < len(sql) and sql[i + 1] == quote:
+                    current.append(sql[i + 1]); i += 2; continue
+                state = "normal"
+            i += 1
+            continue
+        if state == "dollar_quote":
+            if dollar_tag and sql.startswith(dollar_tag, i):
+                current.append(dollar_tag)
+                i += len(dollar_tag)
+                state = "normal"
+                dollar_tag = None
+                continue
+            current.append(sql[i]); i += 1
+
+    trailing = "".join(current).strip()
+    if trailing:
+        statements.append(trailing)
+    return statements
 
 
 def run_migrations() -> None:
@@ -51,9 +139,8 @@ def run_migrations() -> None:
                     raise RuntimeError(f"Applied migration {version} checksum mismatch; refusing to continue.")
                 continue
             # Execute each migration and its bookkeeping insert in the same transaction.
-            for statement in (part.strip() for part in sql.split(";")):
-                if statement:
-                    conn.execute(statement)
+            for statement in _split_sql_statements(sql):
+                conn.execute(statement)
             conn.execute(
                 "INSERT INTO smartdocs_schema_migrations(version, checksum) VALUES (?, ?)",
                 (version, checksum),
