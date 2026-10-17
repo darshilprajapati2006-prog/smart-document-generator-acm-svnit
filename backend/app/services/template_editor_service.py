@@ -91,6 +91,16 @@ class TemplateEditorService:
             "course_semester": "B.Tech CSE - 5th Semester",
             "mobile_number": "9876543210",
             "chairman_name": "Dr. Sankita J. Patel"
+        },
+        "submitted": {
+            "submission_id": "SUB-2026-089",
+            "date": "15/10/2026",
+            "title": "Annual Hackathon Permission & Budget Dossier",
+            "submitted_by": "ACM Lead Organizer",
+            "status": "Submitted / Pending Endorsement",
+            "department": "Computer Science & Engineering, SVNIT",
+            "total_attachments": 4,
+            "remarks": "Official documents submitted for faculty review and institutional approval."
         }
     }
 
@@ -137,6 +147,26 @@ class TemplateEditorService:
                 "receipt_title": "OFFICIAL PRIZE MONEY RECEIPT"
             },
             "optional_sections": ["pan_verification", "course_semester_verification"]
+        },
+        "submitted": {
+            "id": "tmpl-submitted",
+            "template_id": "submitted",
+            "display_name": "Submitted Document / Workflow Manifest",
+            "section_ordering": ["header", "submission_manifest", "document_summary", "approval_workflow", "signatures"],
+            "labels": {
+                "title": "Dossier Title",
+                "submission_id": "Submission ID",
+                "date": "Submission Date",
+                "submitted_by": "Submitted By",
+                "department": "Department",
+                "remarks": "Submission Purpose & Notes"
+            },
+            "branding": {
+                "header_title": "OFFICIAL SUBMISSION MANIFEST & DOSSIER",
+                "institute": "Sardar Vallabhbhai National Institute of Technology, Surat",
+                "department": "ACM SVNIT Chapter"
+            },
+            "optional_sections": ["audit_trail", "faculty_remarks"]
         },
         "bill_certificate": {
             "id": "tmpl-bill-cert",

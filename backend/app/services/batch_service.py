@@ -19,6 +19,10 @@ from app.services.bill_certificate_service import BillCertificateService
 from app.services.bill_summary_service import BillSummaryService
 from app.services.prize_money_receipt_service import PrizeMoneyReceiptService
 from app.services.document_repository import DocumentRepository
+import docx
+from reportlab.lib.pagesizes import A4
+from reportlab.lib.styles import getSampleStyleSheet
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
 
 BATCH_DIR = Path(__file__).resolve().parent.parent.parent / "generated_docs" / "batches"
 BATCH_DIR.mkdir(parents=True, exist_ok=True)
@@ -139,6 +143,65 @@ class BatchService:
                         document_type="prize_money_receipt",
                         title=f"Prize Receipt - {validated.student_name}",
                         data=validated.model_dump(mode="json"),
+                        docx_path=str(docx_p),
+                        pdf_path=str(pdf_p),
+                        change_summary=f"Batch generated ({job_id})"
+                    )
+                elif doc_type == "submitted":
+                    submission_id = payload.get("submission_id", f"SUB-{uuid.uuid4().hex[:6].upper()}")
+                    title = payload.get("title", "Official Submission Manifest & Dossier")
+                    date_str = payload.get("date", "15/10/2026")
+                    submitted_by = payload.get("submitted_by", "ACM Student Chapter")
+                    department = payload.get("department", "Computer Science & Engineering, SVNIT")
+                    remarks = payload.get("remarks", "Document submitted for official workflow verification.")
+
+                    safe_date = sanitize_filename(date_str.replace("/", "-"))
+                    docx_fn = f"{job_id}_Submitted_{safe_date}.docx"
+                    pdf_fn = f"{job_id}_Submitted_{safe_date}.pdf"
+
+                    docx_p = batch_folder / docx_fn
+                    pdf_p = batch_folder / pdf_fn
+
+                    # Generate DOCX
+                    doc = docx.Document()
+                    doc.add_heading("SARDAR VALLABHBHAI NATIONAL INSTITUTE OF TECHNOLOGY, SURAT", level=1)
+                    doc.add_heading("ASSOCIATION FOR COMPUTING MACHINERY (ACM)", level=2)
+                    doc.add_heading(f"SUBMISSION MANIFEST: {title}", level=3)
+                    p = doc.add_paragraph()
+                    p.add_run(f"Submission ID: {submission_id}\n").bold = True
+                    p.add_run(f"Date: {date_str}\n")
+                    p.add_run(f"Submitted By: {submitted_by}\n")
+                    p.add_run(f"Department: {department}\n")
+                    p.add_run(f"Remarks: {remarks}\n")
+                    p.add_run("Status: SUBMITTED (Pending Faculty Endorsement)\n")
+                    doc.save(docx_p)
+
+                    # Generate PDF
+                    doc_pdf = SimpleDocTemplate(str(pdf_p), pagesize=A4, rightMargin=36, leftMargin=36, topMargin=36, bottomMargin=36)
+                    styles = getSampleStyleSheet()
+                    story = [
+                        Paragraph("<b>SARDAR VALLABHBHAI NATIONAL INSTITUTE OF TECHNOLOGY, SURAT</b>", styles["Title"]),
+                        Paragraph("<b>ACM STUDENT CHAPTER — SUBMISSION MANIFEST</b>", styles["Heading2"]),
+                        Spacer(1, 14),
+                        Paragraph(f"<b>Dossier Title:</b> {title}", styles["Normal"]),
+                        Paragraph(f"<b>Submission ID:</b> {submission_id}", styles["Normal"]),
+                        Paragraph(f"<b>Date:</b> {date_str}", styles["Normal"]),
+                        Paragraph(f"<b>Submitted By:</b> {submitted_by}", styles["Normal"]),
+                        Paragraph(f"<b>Department:</b> {department}", styles["Normal"]),
+                        Spacer(1, 10),
+                        Paragraph(f"<b>Remarks / Purpose:</b> {remarks}", styles["Normal"]),
+                        Spacer(1, 10),
+                        Paragraph("<b>Current Status:</b> SUBMITTED &amp; REGISTERED IN WORKFLOW", styles["Normal"]),
+                        Spacer(1, 20),
+                        Paragraph("_______________________<br/>Authorized Submitter Signature", styles["Normal"])
+                    ]
+                    doc_pdf.build(story)
+
+                    DocumentRepository.create_document(
+                        user_id=user_id,
+                        document_type="submitted",
+                        title=title,
+                        data=payload,
                         docx_path=str(docx_p),
                         pdf_path=str(pdf_p),
                         change_summary=f"Batch generated ({job_id})"

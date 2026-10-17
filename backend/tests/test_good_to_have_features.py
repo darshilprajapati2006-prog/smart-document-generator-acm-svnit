@@ -182,13 +182,25 @@ def test_batch_generate_multiple_jobs_and_zip():
                 "mobile_number": "9876543210",
                 "chairman_name": "Dr. Chairman"
             }
+        },
+        {
+            "job_id": "job-4",
+            "document_type": "submitted",
+            "payload": {
+                "submission_id": "SUB-TEST-001",
+                "title": "Batch Submission Manifest",
+                "date": "10/10/2026",
+                "submitted_by": "Test Lead",
+                "department": "CSE Dept",
+                "remarks": "Testing batch submitted doc."
+            }
         }
     ]
     res = client.post("/api/documents/batch/generate", json={"jobs": jobs})
     assert res.status_code == 200
     data = res.json()
-    assert data["total_jobs"] == 3
-    assert data["successful_count"] == 3
+    assert data["total_jobs"] == 4
+    assert data["successful_count"] == 4
     assert data["failed_count"] == 0
     assert data["zip_download_url"] is not None
 
@@ -472,7 +484,7 @@ def test_reusable_clauses_listing_and_interpolation():
 def test_template_preview_and_config():
     res = client.get("/api/documents/templates-config/list")
     assert res.status_code == 200
-    assert len(res.json()["configs"]) == 4
+    assert len(res.json()["configs"]) == 5
 
     prev_res = client.get("/api/documents/templates-config/exec_meet/preview")
     assert prev_res.status_code == 200
@@ -486,6 +498,12 @@ def test_template_preview_and_config():
     prize_data = prize_prev.json()
     assert prize_data["is_sample_preview"] is True
     assert "competition_name" in prize_data["sample_data"]
+
+    sub_prev = client.get("/api/documents/templates-config/submitted/preview")
+    assert sub_prev.status_code == 200
+    sub_data = sub_prev.json()
+    assert sub_data["is_sample_preview"] is True
+    assert "submission_id" in sub_data["sample_data"]
 
 # ============================================================
 # FEATURE 9: ROLE-BASED ACCESS CONTROL (RBAC)

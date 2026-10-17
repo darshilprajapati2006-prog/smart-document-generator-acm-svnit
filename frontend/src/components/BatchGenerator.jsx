@@ -64,26 +64,48 @@ const defaultDemoJobs = [
     job_id: "batch-prize-1",
     document_type: "prize_money_receipt",
     payload: {
+      serial_number: "ACM/PR/2026/01",
       date: "15/10/2026",
+      amount_rupees: 5000.0,
       competition_name: "ACM Algocode Hackathon",
-      event_dates: "24/10/2026 - 25/10/2026",
-      student_name: "Rahul Sharma",
-      roll_no: "U23CS045",
-      phone_no: "9876543210",
-      rank: "1st",
-      prize_money: 5000,
-      bank_account_no: "3928101004567",
+      position: "1st",
+      organizing_body: "ACM SVNIT Chapter",
+      event_date: "25/10/2026",
+      venue: "Seminar Hall 402, SVNIT",
+      affiliating_institute: "SVNIT Surat",
+      name_as_per_bank: "Rahul Sharma",
       bank_name: "State Bank of India",
-      ifsc_code: "SBIN0001234"
+      branch: "SVNIT Campus",
+      account_number: "3928101004567",
+      ifsc_code: "SBIN0001234",
+      pan_number: "ABCDE1234F",
+      student_name: "Rahul Sharma",
+      roll_number: "U23CS045",
+      course_semester: "B.Tech CSE Sem 5",
+      mobile_number: "9876543210",
+      chairman_name: "Dr. Faculty Chairman"
+    }
+  },
+  {
+    job_id: "batch-sub-1",
+    document_type: "submitted",
+    payload: {
+      submission_id: "SUB-2026-101",
+      date: "15/10/2026",
+      title: "Annual Hackathon Dossier & Manifest",
+      submitted_by: "ACM Secretary",
+      department: "Computer Science & Engineering, SVNIT",
+      remarks: "Official event permission, bill summary, and prize receipts bundle."
     }
   }
 ];
 
 const DOC_TYPE_LABELS = {
-  exec_meet: "Executive Meet / Permission Document",
+  exec_meet: "Permission Document (Executive Meet)",
   prize_money_receipt: "Prize Money Receipt",
-  bill_certificate: "Bill Certificate",
-  bill_summary: "Bill Summary"
+  submitted: "Submitted Document (Workflow Manifest)",
+  bill_summary: "Bill Summary",
+  bill_certificate: "Bill Certi"
 };
 
 const DEFAULT_JOB_PAYLOADS = {
@@ -101,17 +123,34 @@ const DEFAULT_JOB_PAYLOADS = {
     organizers: "ACM SVNIT Chapter"
   },
   prize_money_receipt: {
+    serial_number: "ACM/PR/2026/01",
     date: "15/10/2026",
+    amount_rupees: 5000.0,
     competition_name: "ACM Algocode Hackathon",
-    event_dates: "24/10/2026 - 25/10/2026",
-    student_name: "Rahul Sharma",
-    roll_no: "U23CS045",
-    phone_no: "9876543210",
-    rank: "1st",
-    prize_money: 5000,
-    bank_account_no: "3928101004567",
+    position: "1st",
+    organizing_body: "ACM SVNIT Chapter",
+    event_date: "25/10/2026",
+    venue: "Seminar Hall 402, SVNIT",
+    affiliating_institute: "SVNIT Surat",
+    name_as_per_bank: "Rahul Sharma",
     bank_name: "State Bank of India",
-    ifsc_code: "SBIN0001234"
+    branch: "SVNIT Campus",
+    account_number: "3928101004567",
+    ifsc_code: "SBIN0001234",
+    pan_number: "ABCDE1234F",
+    student_name: "Rahul Sharma",
+    roll_number: "U23CS045",
+    course_semester: "B.Tech CSE Sem 5",
+    mobile_number: "9876543210",
+    chairman_name: "Dr. Faculty Chairman"
+  },
+  submitted: {
+    submission_id: "SUB-2026-101",
+    date: "15/10/2026",
+    title: "Annual Hackathon Dossier & Manifest",
+    submitted_by: "ACM Secretary",
+    department: "Computer Science & Engineering, SVNIT",
+    remarks: "Official event permission, bill summary, and prize receipts bundle."
   },
   bill_certificate: {
     chapter_name: "ACM",
@@ -219,10 +258,11 @@ export default function BatchGenerator() {
             style={{ padding: "6px 10px", fontSize: "0.85rem", borderRadius: "6px" }}
             aria-label="Document type to add"
           >
-            <option value="exec_meet">Executive Meet</option>
+            <option value="exec_meet">Permission Document</option>
             <option value="prize_money_receipt">Prize Money Receipt</option>
-            <option value="bill_certificate">Bill Certificate</option>
+            <option value="submitted">Submitted Document</option>
             <option value="bill_summary">Bill Summary</option>
+            <option value="bill_certificate">Bill Certi</option>
           </select>
           <button
             type="button"

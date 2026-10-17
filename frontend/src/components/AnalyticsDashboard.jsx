@@ -49,8 +49,9 @@ export default function AnalyticsDashboard() {
             style={{ padding: "6px 12px", fontSize: "0.85rem" }}
           >
             <option value="">All Document Types</option>
-            <option value="exec_meet">Executive Meet</option>
+            <option value="exec_meet">Permission Document (Executive Meet)</option>
             <option value="prize_money_receipt">Prize Money Receipt</option>
+            <option value="submitted">Submitted Document</option>
             <option value="bill_summary">Bill Summary</option>
             <option value="bill_certificate">Bill Certi</option>
           </select>
@@ -105,12 +106,16 @@ export default function AnalyticsDashboard() {
               </h4>
               <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
                 <div style={{ display: "flex", justifyContent: "space-between", fontSize: "0.88rem" }}>
-                  <span>Executive Meet:</span>
+                  <span>Permission Document:</span>
                   <span style={{ fontWeight: "700" }}>{metrics.documents_by_type?.exec_meet || 0}</span>
                 </div>
                 <div style={{ display: "flex", justifyContent: "space-between", fontSize: "0.88rem" }}>
                   <span>Prize Money Receipt:</span>
                   <span style={{ fontWeight: "700" }}>{metrics.documents_by_type?.prize_money_receipt || 0}</span>
+                </div>
+                <div style={{ display: "flex", justifyContent: "space-between", fontSize: "0.88rem" }}>
+                  <span>Submitted Document:</span>
+                  <span style={{ fontWeight: "700" }}>{metrics.documents_by_type?.submitted ?? (metrics.workflow_status_distribution?.submitted || 0)}</span>
                 </div>
                 <div style={{ display: "flex", justifyContent: "space-between", fontSize: "0.88rem" }}>
                   <span>Bill Summary:</span>

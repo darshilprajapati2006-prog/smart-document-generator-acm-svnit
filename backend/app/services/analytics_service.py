@@ -83,9 +83,10 @@ class AnalyticsService:
                 "success_rate_percentage": round(((total_gen - failures) / total_gen * 100) if total_gen > 0 else 100.0, 1),
                 "avg_generation_duration_ms": avg_duration,
                 "documents_by_type": {
-                "exec_meet": doc_type_counts.get("exec_meet", 0),
-                "prize_money_receipt": doc_type_counts.get("prize_money_receipt", 0),
-                "bill_certificate": doc_type_counts.get("bill_certificate", 0),
+                    "exec_meet": doc_type_counts.get("exec_meet", 0),
+                    "prize_money_receipt": doc_type_counts.get("prize_money_receipt", 0),
+                    "submitted": doc_type_counts.get("submitted", 0) + status_distribution.get("submitted", 0),
+                    "bill_certificate": doc_type_counts.get("bill_certificate", 0),
                     "bill_summary": doc_type_counts.get("bill_summary", 0)
                 },
                 "workflow_status_distribution": status_distribution

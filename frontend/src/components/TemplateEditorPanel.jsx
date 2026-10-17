@@ -2,10 +2,11 @@ import { useEffect, useRef, useState } from "react";
 import { fetchTemplateConfigs, fetchTemplatePreview, updateTemplateConfig } from "../services/documentApi";
 
 const TEMPLATE_OPTIONS = [
-  { id: "exec_meet", label: "Executive Meet Request" },
+  { id: "exec_meet", label: "Permission Document (Executive Meet)" },
   { id: "prize_money_receipt", label: "Prize Money Receipt" },
-  { id: "bill_certificate", label: "Bill Certificate (Recurring)" },
+  { id: "submitted", label: "Submitted Document (Workflow Manifest)" },
   { id: "bill_summary", label: "Bill Summary" },
+  { id: "bill_certificate", label: "Bill Certi (Recurring)" },
 ];
 const EDITOR_ROLES = new Set(["template_admin", "tmpladmin", "admin"]);
 
