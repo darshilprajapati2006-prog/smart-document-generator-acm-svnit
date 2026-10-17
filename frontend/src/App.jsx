@@ -2057,7 +2057,7 @@ export default function App() {
                                 return;
                               }
                               const reader = new FileReader();
-                              reader.onload = () => setLeadSignature(createLeadSignatureState(String(reader.result || ""), file.name));
+                              reader.onload = () => setLeadSignature(createLeadSignatureState(String(reader.result || ""), file.name, true));
                               reader.onerror = () => setLeadSignature(clearLeadSignatureState("Unable to read this image. Please try another file."));
                               reader.readAsDataURL(file);
                             }}

@@ -451,7 +451,7 @@ class ExecutiveMeetService:
             width_px, height_px = ImageReader(signature_stream).getSize()
             scale = min(1.35 * inch / width_px, 0.42 * inch / height_px)
             signature_stream.seek(0)
-            return [paragraph, RLImage(signature_stream, width=width_px * scale, height=height_px * scale)]
+            return [paragraph, Spacer(1, 4), RLImage(signature_stream, width=width_px * scale, height=height_px * scale)]
 
         card1 = make_sig_card(data.lead_name, data.lead_designation, data.lead_branch, "Admission No.", data.lead_admission_no, data.lead_mobile, data.lead_signature_data)
         card2 = make_sig_card(data.tech_assist_name, data.tech_assist_designation, data.tech_assist_branch, mobile=data.tech_assist_mobile)
