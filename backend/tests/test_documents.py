@@ -76,6 +76,66 @@ def test_prize_money_receipt_generation_and_download():
         assert value in text
 
 
+def test_submitted_document_generation_and_download():
+    payload = {
+        "ref_no": "ACM/2026-27/SIH/001",
+        "date": "08/09/2026",
+        "submitted_to": "Dean (Students Welfare)",
+        "subject": "Requesting Permission to Conduct Internal Hackathon of SIH",
+        "chapter_name": "ACM",
+        "code_no": "6/52",
+        "event_schedule": "September 12th 2026",
+        "event_venue": "CSE Department",
+        "event_title": "Internal Hackathon of SIH",
+        "category": "Hackathon",
+        "brief_description": "The Internal Hackathon for Smart India Hackathon.",
+        "objectives": "The SIH Internal Hackathon aims to foster innovation.",
+        "target_audience": "All year Student",
+        "expected_participants": "1000+",
+        "judges": "Dr. Alok Kumar",
+        "financial_items": [
+            {"item": "Banner (8*6)", "amount": 800.0},
+            {"item": "Miscellaneous", "amount": 300.0}
+        ],
+        "student_head_name": "Ansh Gupta",
+        "student_head_roll": "I24AI005",
+        "student_head_branch": "AI",
+        "student_head_mobile": "+91 87806 37299",
+        "student_secretary_name": "Arshad Khatib",
+        "student_secretary_roll": "U24AI112",
+        "student_secretary_branch": "AI",
+        "student_secretary_mobile": "+91 88060 45005",
+        "faculty_co_chairman_name": "Dr. Balu Parne",
+        "faculty_co_chairman_designation": "Co-Chairman",
+        "faculty_co_chairman_dept": "CSE",
+        "faculty_co_chairman_mobile": "+91 94224 48729",
+        "faculty_chairman_name": "Dr. Sankita Patel",
+        "faculty_chairman_designation": "Chairman",
+        "faculty_chairman_dept": "CSE",
+        "faculty_chairman_mobile": "+91 98792 20919",
+        "office_sanctioned_amount": "",
+        "office_amount_utilized": "",
+        "office_proposed_amount": "1100",
+        "office_balance_amount": "",
+        "office_clerk_signature": "Signature (Office Clerk)",
+        "chairman_fsw": "Dr. Rakesh Maurya",
+        "associate_dean_sw": "Dr. Manish K Rathod",
+        "dean_sw": "Dr. Sanjay R. Patel"
+    }
+    response = client.post("/api/documents/submitted/generate", json=payload)
+    assert response.status_code == 200, response.text
+    data = response.json()
+    assert data["document_type"] == "submitted"
+    assert data["files"]["pdf"]["filename"].endswith(".pdf")
+    assert data["files"]["docx"]["filename"].endswith(".docx")
+
+    docx_response = client.get(data["files"]["docx"]["download_url"])
+    pdf_response = client.get(data["files"]["pdf"]["download_url"])
+    assert docx_response.status_code == pdf_response.status_code == 200
+    assert len(pdf_response.content) > 1000
+    assert pdf_response.content.startswith(b"%PDF-")
+
+
 def test_prize_money_receipt_rejects_missing_and_invalid_amount():
     response = client.post("/api/documents/prize-money-receipt/generate", json={})
     assert response.status_code == 422

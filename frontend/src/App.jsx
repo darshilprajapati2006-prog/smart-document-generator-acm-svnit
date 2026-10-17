@@ -18,6 +18,7 @@ import {
   generateBillCertificate,
   generateBillSummary,
   generatePrizeMoneyReceipt,
+  generateSubmittedDoc,
   extractFromNLP,
   classifyPrompt,
   logoutUser,
@@ -27,7 +28,7 @@ import {
   downloadGeneratedFile,
 } from "./services/documentApi";
 
-// Document-generation priorities. Submitted opens the existing workflow history.
+// Document-generation priorities.
 const documentCards = [
   {
     id: "exec_meet",
@@ -46,10 +47,9 @@ const documentCards = [
   {
     id: "submitted",
     priority: 3,
-    title: "Submitted",
-    description: "View submitted documents, their current status, approval history, and available actions.",
-    icon: "⏳",
-    workflowOnly: true,
+    title: "Submitted (Dean SW)",
+    description: "Prepare an official SVNIT Event Permission & Financial Proposal submitted to Dean (Students Welfare).",
+    icon: "📑",
   },
   {
     id: "bill_summary",
@@ -211,6 +211,53 @@ const mockDemoData = {
     faculty_chairman_title: "Faculty Chairman",
     club_name: "ACM NIT-Surat",
   },
+  submitted: {
+    ref_no: "ACM/2026-27/SIH/001",
+    date: "08/09/2026",
+    submitted_to: "Dean (Students Welfare)",
+    subject: "Requesting Permission to Conduct Internal Hackathon of SIH",
+    chapter_name: "ACM",
+    code_no: "6/52",
+    event_schedule: "September 12th 2026",
+    event_venue: "CSE Department",
+    event_title: "Internal Hackathon of SIH",
+    category: "Hackathon",
+    brief_description:
+      "The Internal Hackathon for Smart India Hackathon (SIH) is an institute-level selection round organized to shortlist the best student teams who will represent the college/university at the National Level Smart India Hackathon.",
+    objectives:
+      "The SIH Internal Hackathon aims to foster innovation and problem-solving among students by encouraging them to develop practical solutions for real-world challenges. It promotes teamwork, creativity, and technical expertise while selecting the most promising projects to represent the institute at the national Smart India Hackathon stage.",
+    target_audience: "All year Student",
+    expected_participants: "1000+",
+    judges: "Dr. Alok Kumar",
+    financial_items: [
+      { item: "Banner (8*6)", amount: 800 },
+      { item: "Miscellaneous", amount: 300 },
+    ],
+    student_head_name: "Ansh Gupta",
+    student_head_roll: "I24AI005",
+    student_head_branch: "AI",
+    student_head_mobile: "+91 87806 37299",
+    student_secretary_name: "Arshad Khatib",
+    student_secretary_roll: "U24AI112",
+    student_secretary_branch: "AI",
+    student_secretary_mobile: "+91 88060 45005",
+    faculty_co_chairman_name: "Dr. Balu Parne",
+    faculty_co_chairman_designation: "Co-Chairman",
+    faculty_co_chairman_dept: "CSE",
+    faculty_co_chairman_mobile: "+91 94224 48729",
+    faculty_chairman_name: "Dr. Sankita Patel",
+    faculty_chairman_designation: "Chairman",
+    faculty_chairman_dept: "CSE",
+    faculty_chairman_mobile: "+91 98792 20919",
+    office_sanctioned_amount: "",
+    office_amount_utilized: "",
+    office_proposed_amount: "",
+    office_balance_amount: "",
+    office_clerk_signature: "",
+    chairman_fsw: "Dr. Rakesh Maurya",
+    associate_dean_sw: "Dr. Manish K Rathod",
+    dean_sw: "Dr. Sanjay R. Patel",
+  },
 };
 
 // CLEAN INITIAL FORM STATES
@@ -332,6 +379,49 @@ const emptyPrizeMoneyState = {
   chairman_name: "",
 };
 
+const emptySubmittedState = {
+  ref_no: "",
+  date: "",
+  submitted_to: "Dean (Students Welfare)",
+  subject: "",
+  chapter_name: "ACM",
+  code_no: "6/52",
+  event_schedule: "",
+  event_venue: "",
+  event_title: "",
+  category: "Hackathon",
+  brief_description: "",
+  objectives: "",
+  target_audience: "All year Student",
+  expected_participants: "",
+  judges: "",
+  financial_items: [{ item: "", amount: "" }],
+  student_head_name: "",
+  student_head_roll: "",
+  student_head_branch: "",
+  student_head_mobile: "",
+  student_secretary_name: "",
+  student_secretary_roll: "",
+  student_secretary_branch: "",
+  student_secretary_mobile: "",
+  faculty_co_chairman_name: "",
+  faculty_co_chairman_designation: "Co-Chairman",
+  faculty_co_chairman_dept: "CSE",
+  faculty_co_chairman_mobile: "",
+  faculty_chairman_name: "",
+  faculty_chairman_designation: "Chairman",
+  faculty_chairman_dept: "CSE",
+  faculty_chairman_mobile: "",
+  office_sanctioned_amount: "",
+  office_amount_utilized: "",
+  office_proposed_amount: "",
+  office_balance_amount: "",
+  office_clerk_signature: "",
+  chairman_fsw: "Dr. Rakesh Maurya",
+  associate_dean_sw: "Dr. Manish K Rathod",
+  dean_sw: "Dr. Sanjay R. Patel",
+};
+
 export default function App() {
   const [selectedType, setSelectedType] = useState("exec_meet");
 
@@ -342,6 +432,7 @@ export default function App() {
   const [billCertData, setBillCertData] = useState(emptyBillCertState);
   const [billSummaryData, setBillSummaryData] = useState(emptyBillSummaryState);
   const [prizeMoneyData, setPrizeMoneyData] = useState(emptyPrizeMoneyState);
+  const [submittedData, setSubmittedData] = useState(emptySubmittedState);
 
   // Review & Generation Flow
   const [reviewState, setReviewState] = useState(null);
@@ -508,11 +599,6 @@ export default function App() {
 
   // Document Type Switching
   function handleTypeChange(type) {
-    if (type === "submitted") {
-      setSelectedDocIdForHistory("");
-      setActiveTab("history");
-      return;
-    }
     setSelectedType(type);
     setActiveTab("create");
     setReviewState(null);
@@ -531,6 +617,8 @@ export default function App() {
       setBillSummaryData(emptyBillSummaryState);
     } else if (selectedType === "prize_money_receipt") {
       setPrizeMoneyData(emptyPrizeMoneyState);
+    } else if (selectedType === "submitted") {
+      setSubmittedData(emptySubmittedState);
     }
     setReviewState(null);
     setGeneratedResult(null);
@@ -546,6 +634,8 @@ export default function App() {
       setBillCertData({ ...mockDemoData.bill_certificate });
     } else if (selectedType === "bill_summary") {
       setBillSummaryData({ ...mockDemoData.bill_summary });
+    } else if (selectedType === "submitted") {
+      setSubmittedData({ ...mockDemoData.submitted });
     }
     setReviewState(null);
     setGeneratedResult(null);
@@ -870,6 +960,38 @@ export default function App() {
   );
   const summaryGrandTotal = summaryPrizeTotal + summaryOtherTotal;
 
+  // Dynamic Row Operations for Submitted Financial Items
+  function addSubmittedFinItem() {
+    setSubmittedData((prev) => ({
+      ...prev,
+      financial_items: [...prev.financial_items, { item: "", amount: "" }],
+    }));
+  }
+
+  function removeSubmittedFinItem(index) {
+    if (submittedData.financial_items.length <= 1) {
+      setError("At least one financial item is required.");
+      return;
+    }
+    setSubmittedData((prev) => ({
+      ...prev,
+      financial_items: prev.financial_items.filter((_, i) => i !== index),
+    }));
+  }
+
+  function updateSubmittedFinItem(index, field, value) {
+    setSubmittedData((prev) => {
+      const next = [...prev.financial_items];
+      next[index] = { ...next[index], [field]: value };
+      return { ...prev, financial_items: next };
+    });
+  }
+
+  const submittedFinTotal = (submittedData.financial_items || []).reduce(
+    (sum, it) => sum + (Number(it.amount) || 0),
+    0
+  );
+
   // DYNAMIC HEADER LOGIC
   let dynamicFormHeading = "";
   let formSubtitle = "";
@@ -898,6 +1020,9 @@ export default function App() {
   } else if (selectedType === "prize_money_receipt") {
     dynamicFormHeading = prizeMoneyData.competition_name.trim() || "Prize Money Receipt";
     formSubtitle = "Official individual prize payment receipt with student and bank details.";
+  } else if (selectedType === "submitted") {
+    dynamicFormHeading = submittedData.event_title.trim() || "Submitted Document";
+    formSubtitle = "Official Event Permission & Financial Proposal submitted to Dean (Students Welfare).";
   }
 
   // REVIEW HANDLER
@@ -1042,6 +1167,52 @@ export default function App() {
           { label: "Chairman", value: prizeMoneyData.chairman_name },
         ],
       });
+    } else if (selectedType === "submitted") {
+      const requiredFields = [
+        ["ref_no", "Reference Number"],
+        ["date", "Document Date"],
+        ["submitted_to", "Submitted To"],
+        ["subject", "Subject"],
+        ["chapter_name", "Chapter Name"],
+        ["code_no", "Chapter Code No"],
+        ["event_schedule", "Schedule of Event"],
+        ["event_venue", "Event Venue"],
+        ["event_title", "Title of the Event"],
+        ["category", "Category of the Event"],
+        ["brief_description", "Brief Description"],
+        ["objectives", "Objectives"],
+        ["target_audience", "Target Audience"],
+        ["expected_participants", "Expected Participants"],
+        ["student_head_name", "Student Head Name"],
+        ["student_secretary_name", "Student Secretary Name"],
+        ["faculty_co_chairman_name", "Faculty Co-Chairman Name"],
+        ["faculty_chairman_name", "Faculty Chairman Name"],
+      ];
+      const missing = requiredFields.filter(([key]) => !String(submittedData[key] ?? "").trim()).map(([, label]) => label);
+      if (missing.length) {
+        setError(`Please complete the required fields: ${missing.join(", ")}.`);
+        return;
+      }
+      setReviewState({
+        type: "Submitted to Dean (SW)",
+        displayHeading: submittedData.event_title || submittedData.subject,
+        data: { ...submittedData },
+        displayFields: [
+          { label: "Reference Number", value: submittedData.ref_no },
+          { label: "Date", value: submittedData.date },
+          { label: "Submitted To", value: submittedData.submitted_to },
+          { label: "Subject", value: submittedData.subject },
+          { label: "Chapter & Code", value: `${submittedData.chapter_name} (${submittedData.code_no})` },
+          { label: "Schedule & Venue", value: `${submittedData.event_schedule} · ${submittedData.event_venue}` },
+          { label: "Event Title", value: submittedData.event_title },
+          { label: "Category", value: submittedData.category },
+          { label: "Total Proposed Expenses", value: `₹${submittedFinTotal.toLocaleString("en-IN")}` },
+          { label: "Student Head", value: `${submittedData.student_head_name} (${submittedData.student_head_roll || ""})` },
+          { label: "Student Secretary", value: `${submittedData.student_secretary_name} (${submittedData.student_secretary_roll || ""})` },
+          { label: "Faculty Co-Chairman", value: submittedData.faculty_co_chairman_name },
+          { label: "Faculty Chairman", value: submittedData.faculty_chairman_name },
+        ],
+      });
     }
   }
 
@@ -1147,6 +1318,14 @@ export default function App() {
           amount_rupees: amount,
           ifsc_code: prizeMoneyData.ifsc_code.trim().toUpperCase(),
           pan_number: prizeMoneyData.pan_number.trim().toUpperCase(),
+        });
+      } else if (selectedType === "submitted") {
+        result = await generateSubmittedDoc({
+          ...submittedData,
+          financial_items: (submittedData.financial_items || []).map((it) => ({
+            item: it.item.trim(),
+            amount: Number(it.amount) || 0,
+          })),
         });
       }
 
@@ -2037,6 +2216,10 @@ export default function App() {
                           <span>Student Branch *</span>
                           <input type="text" maxLength={120} value={execData.lead_branch} onChange={(e) => setExecData({ ...execData, lead_branch: e.target.value })} />
                         </label>
+                        <label className="field">
+                          <span>Student Lead Mobile Number</span>
+                          <input type="tel" maxLength={20} autoComplete="tel" placeholder="Enter the student lead's mobile number" value={execData.lead_mobile} onChange={(e) => setExecData({ ...execData, lead_mobile: e.target.value })} />
+                        </label>
                         <section className="lead-signature-upload" aria-labelledby="lead-signature-title">
                           <div>
                             <h4 id="lead-signature-title">Student Lead Signature</h4>
@@ -2088,6 +2271,10 @@ export default function App() {
                         <label className="field">
                           <span>Technical Assistant Branch *</span>
                           <input type="text" maxLength={120} value={execData.tech_assist_branch} onChange={(e) => setExecData({ ...execData, tech_assist_branch: e.target.value })} />
+                        </label>
+                        <label className="field">
+                          <span>Technical Assistant Mobile Number</span>
+                          <input type="tel" maxLength={20} autoComplete="tel" placeholder="Enter the technical assistant's mobile number" value={execData.tech_assist_mobile} onChange={(e) => setExecData({ ...execData, tech_assist_mobile: e.target.value })} />
                         </label>
                         <label className="field">
                           <span>Faculty In-Charge Name *</span>
@@ -2557,6 +2744,470 @@ export default function App() {
                             onChange={(e) =>
                               setBillSummaryData({ ...billSummaryData, club_name: e.target.value })
                             }
+                          />
+                        </label>
+                      </div>
+                    </>
+                  )}
+
+                  {/* FORM TYPE 5: SUBMITTED (DEAN SW PERMISSION & FINANCIAL PROPOSAL) */}
+                  {selectedType === "submitted" && (
+                    <>
+                      <div className="form-section-title">SUBMISSION & REFERENCE DETAILS</div>
+                      <div className="form-grid">
+                        <label className="field">
+                          <span>Reference Number *</span>
+                          <input
+                            type="text"
+                            placeholder="e.g., ACM/2026-27/SIH/001"
+                            value={submittedData.ref_no}
+                            onChange={(e) => setSubmittedData({ ...submittedData, ref_no: e.target.value })}
+                            required
+                          />
+                        </label>
+                        <label className="field">
+                          <span>Document Date *</span>
+                          <input
+                            type="text"
+                            placeholder="e.g., 08/09/2026"
+                            value={submittedData.date}
+                            onChange={(e) => setSubmittedData({ ...submittedData, date: e.target.value })}
+                            required
+                          />
+                        </label>
+                        <label className="field">
+                          <span>Submitted To *</span>
+                          <input
+                            type="text"
+                            placeholder="e.g., Dean (Students Welfare)"
+                            value={submittedData.submitted_to}
+                            onChange={(e) => setSubmittedData({ ...submittedData, submitted_to: e.target.value })}
+                            required
+                          />
+                        </label>
+                        <label className="field">
+                          <span>Chapter / Club Name *</span>
+                          <input
+                            type="text"
+                            placeholder="e.g., ACM"
+                            value={submittedData.chapter_name}
+                            onChange={(e) => setSubmittedData({ ...submittedData, chapter_name: e.target.value })}
+                            required
+                          />
+                        </label>
+                        <label className="field">
+                          <span>Chapter Code No *</span>
+                          <input
+                            type="text"
+                            placeholder="e.g., 6/52"
+                            value={submittedData.code_no}
+                            onChange={(e) => setSubmittedData({ ...submittedData, code_no: e.target.value })}
+                            required
+                          />
+                        </label>
+                        <label className="field">
+                          <span>Schedule of Event (Date, Day) *</span>
+                          <input
+                            type="text"
+                            placeholder="e.g., September 12th 2026"
+                            value={submittedData.event_schedule}
+                            onChange={(e) => setSubmittedData({ ...submittedData, event_schedule: e.target.value })}
+                            required
+                          />
+                        </label>
+                        <label className="field">
+                          <span>Event Venue *</span>
+                          <input
+                            type="text"
+                            placeholder="e.g., CSE Department"
+                            value={submittedData.event_venue}
+                            onChange={(e) => setSubmittedData({ ...submittedData, event_venue: e.target.value })}
+                            required
+                          />
+                        </label>
+                        <label className="field full-width">
+                          <span>Subject *</span>
+                          <input
+                            type="text"
+                            placeholder="e.g., Requesting Permission to Conduct Internal Hackathon of SIH"
+                            value={submittedData.subject}
+                            onChange={(e) => setSubmittedData({ ...submittedData, subject: e.target.value })}
+                            required
+                          />
+                        </label>
+                      </div>
+
+                      <div className="form-section-title">ABOUT THE EVENT</div>
+                      <div className="form-grid">
+                        <label className="field">
+                          <span>Title of the Event *</span>
+                          <input
+                            type="text"
+                            placeholder="e.g., Internal Hackathon of SIH"
+                            value={submittedData.event_title}
+                            onChange={(e) => setSubmittedData({ ...submittedData, event_title: e.target.value })}
+                            required
+                          />
+                        </label>
+                        <label className="field">
+                          <span>Category of the Event *</span>
+                          <input
+                            type="text"
+                            placeholder="e.g., Hackathon"
+                            value={submittedData.category}
+                            onChange={(e) => setSubmittedData({ ...submittedData, category: e.target.value })}
+                            required
+                          />
+                        </label>
+                        <label className="field">
+                          <span>Target Audience *</span>
+                          <input
+                            type="text"
+                            placeholder="e.g., All year Student"
+                            value={submittedData.target_audience}
+                            onChange={(e) => setSubmittedData({ ...submittedData, target_audience: e.target.value })}
+                            required
+                          />
+                        </label>
+                        <label className="field">
+                          <span>Expected Participants *</span>
+                          <input
+                            type="text"
+                            placeholder="e.g., 1000+"
+                            value={submittedData.expected_participants}
+                            onChange={(e) => setSubmittedData({ ...submittedData, expected_participants: e.target.value })}
+                            required
+                          />
+                        </label>
+                        <label className="field full-width">
+                          <span>Name of Judges / Resource Persons</span>
+                          <input
+                            type="text"
+                            placeholder="e.g., Dr. Alok Kumar"
+                            value={submittedData.judges}
+                            onChange={(e) => setSubmittedData({ ...submittedData, judges: e.target.value })}
+                          />
+                        </label>
+                        <label className="field full-width">
+                          <span>Brief Description *</span>
+                          <textarea
+                            rows={3}
+                            placeholder="Brief summary of the event purpose and structure..."
+                            value={submittedData.brief_description}
+                            onChange={(e) => setSubmittedData({ ...submittedData, brief_description: e.target.value })}
+                            required
+                          />
+                        </label>
+                        <label className="field full-width">
+                          <span>Objectives *</span>
+                          <textarea
+                            rows={3}
+                            placeholder="Key goals and outcomes expected from this event..."
+                            value={submittedData.objectives}
+                            onChange={(e) => setSubmittedData({ ...submittedData, objectives: e.target.value })}
+                            required
+                          />
+                        </label>
+                      </div>
+
+                      <div className="form-section-title">FINANCIAL PROPOSAL (EVENT EXPENSES)</div>
+                      <table className="items-table">
+                        <thead>
+                          <tr>
+                            <th>Items / Description *</th>
+                            <th style={{ width: 160 }}>Approximate Amount (Rs) *</th>
+                            <th style={{ width: 70 }}>Action</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {submittedData.financial_items.map((item, idx) => (
+                            <tr key={idx}>
+                              <td>
+                                <input
+                                  type="text"
+                                  placeholder="e.g., Banner (8*6), Refreshments, Miscellaneous"
+                                  value={item.item}
+                                  onChange={(e) => updateSubmittedFinItem(idx, "item", e.target.value)}
+                                  required
+                                />
+                              </td>
+                              <td>
+                                <input
+                                  type="number"
+                                  min="0"
+                                  placeholder="0"
+                                  value={item.amount}
+                                  onChange={(e) => updateSubmittedFinItem(idx, "amount", e.target.value)}
+                                  required
+                                />
+                              </td>
+                              <td>
+                                <button
+                                  type="button"
+                                  className="table-btn delete-btn"
+                                  onClick={() => removeSubmittedFinItem(idx)}
+                                  disabled={submittedData.financial_items.length <= 1}
+                                  title="Delete item"
+                                >
+                                  ✕
+                                </button>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+
+                      <div style={{ marginTop: 10, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                        <button type="button" className="table-btn add-btn" onClick={addSubmittedFinItem}>
+                          ＋ Add Expense Item
+                        </button>
+                        <div style={{ fontWeight: 700, fontSize: 14 }}>
+                          Total Proposed Expenses: ₹{submittedFinTotal.toLocaleString("en-IN")}
+                        </div>
+                      </div>
+
+                      <div className="form-section-title">STUDENT SIGNATORIES (PAGE 2)</div>
+                      <div className="form-grid">
+                        <label className="field">
+                          <span>Student Head Name *</span>
+                          <input
+                            type="text"
+                            placeholder="e.g., Ansh Gupta"
+                            value={submittedData.student_head_name}
+                            onChange={(e) => setSubmittedData({ ...submittedData, student_head_name: e.target.value })}
+                            required
+                          />
+                        </label>
+                        <label className="field">
+                          <span>Student Head Roll No *</span>
+                          <input
+                            type="text"
+                            placeholder="e.g., I24AI005"
+                            value={submittedData.student_head_roll}
+                            onChange={(e) => setSubmittedData({ ...submittedData, student_head_roll: e.target.value })}
+                            required
+                          />
+                        </label>
+                        <label className="field">
+                          <span>Student Head Branch *</span>
+                          <input
+                            type="text"
+                            placeholder="e.g., AI"
+                            value={submittedData.student_head_branch}
+                            onChange={(e) => setSubmittedData({ ...submittedData, student_head_branch: e.target.value })}
+                            required
+                          />
+                        </label>
+                        <label className="field">
+                          <span>Student Head Mobile *</span>
+                          <input
+                            type="tel"
+                            placeholder="e.g., +91 87806 37299"
+                            value={submittedData.student_head_mobile}
+                            onChange={(e) => setSubmittedData({ ...submittedData, student_head_mobile: e.target.value })}
+                            required
+                          />
+                        </label>
+
+                        <label className="field">
+                          <span>Student Secretary Name *</span>
+                          <input
+                            type="text"
+                            placeholder="e.g., Arshad Khatib"
+                            value={submittedData.student_secretary_name}
+                            onChange={(e) => setSubmittedData({ ...submittedData, student_secretary_name: e.target.value })}
+                            required
+                          />
+                        </label>
+                        <label className="field">
+                          <span>Student Secretary Roll No *</span>
+                          <input
+                            type="text"
+                            placeholder="e.g., U24AI112"
+                            value={submittedData.student_secretary_roll}
+                            onChange={(e) => setSubmittedData({ ...submittedData, student_secretary_roll: e.target.value })}
+                            required
+                          />
+                        </label>
+                        <label className="field">
+                          <span>Student Secretary Branch *</span>
+                          <input
+                            type="text"
+                            placeholder="e.g., AI"
+                            value={submittedData.student_secretary_branch}
+                            onChange={(e) => setSubmittedData({ ...submittedData, student_secretary_branch: e.target.value })}
+                            required
+                          />
+                        </label>
+                        <label className="field">
+                          <span>Student Secretary Mobile *</span>
+                          <input
+                            type="tel"
+                            placeholder="e.g., +91 88060 45005"
+                            value={submittedData.student_secretary_mobile}
+                            onChange={(e) => setSubmittedData({ ...submittedData, student_secretary_mobile: e.target.value })}
+                            required
+                          />
+                        </label>
+                      </div>
+
+                      <div className="form-section-title">FACULTY SIGNATORIES (PAGE 2)</div>
+                      <div className="form-grid">
+                        <label className="field">
+                          <span>Faculty Co-Chairman Name *</span>
+                          <input
+                            type="text"
+                            placeholder="e.g., Dr. Balu Parne"
+                            value={submittedData.faculty_co_chairman_name}
+                            onChange={(e) => setSubmittedData({ ...submittedData, faculty_co_chairman_name: e.target.value })}
+                            required
+                          />
+                        </label>
+                        <label className="field">
+                          <span>Co-Chairman Designation *</span>
+                          <input
+                            type="text"
+                            placeholder="e.g., Co-Chairman"
+                            value={submittedData.faculty_co_chairman_designation}
+                            onChange={(e) => setSubmittedData({ ...submittedData, faculty_co_chairman_designation: e.target.value })}
+                            required
+                          />
+                        </label>
+                        <label className="field">
+                          <span>Co-Chairman Department *</span>
+                          <input
+                            type="text"
+                            placeholder="e.g., CSE"
+                            value={submittedData.faculty_co_chairman_dept}
+                            onChange={(e) => setSubmittedData({ ...submittedData, faculty_co_chairman_dept: e.target.value })}
+                            required
+                          />
+                        </label>
+                        <label className="field">
+                          <span>Co-Chairman Mobile *</span>
+                          <input
+                            type="tel"
+                            placeholder="e.g., +91 94224 48729"
+                            value={submittedData.faculty_co_chairman_mobile}
+                            onChange={(e) => setSubmittedData({ ...submittedData, faculty_co_chairman_mobile: e.target.value })}
+                            required
+                          />
+                        </label>
+
+                        <label className="field">
+                          <span>Faculty Chairman Name *</span>
+                          <input
+                            type="text"
+                            placeholder="e.g., Dr. Sankita Patel"
+                            value={submittedData.faculty_chairman_name}
+                            onChange={(e) => setSubmittedData({ ...submittedData, faculty_chairman_name: e.target.value })}
+                            required
+                          />
+                        </label>
+                        <label className="field">
+                          <span>Chairman Designation *</span>
+                          <input
+                            type="text"
+                            placeholder="e.g., Chairman"
+                            value={submittedData.faculty_chairman_designation}
+                            onChange={(e) => setSubmittedData({ ...submittedData, faculty_chairman_designation: e.target.value })}
+                            required
+                          />
+                        </label>
+                        <label className="field">
+                          <span>Chairman Department *</span>
+                          <input
+                            type="text"
+                            placeholder="e.g., CSE"
+                            value={submittedData.faculty_chairman_dept}
+                            onChange={(e) => setSubmittedData({ ...submittedData, faculty_chairman_dept: e.target.value })}
+                            required
+                          />
+                        </label>
+                        <label className="field">
+                          <span>Chairman Mobile *</span>
+                          <input
+                            type="tel"
+                            placeholder="e.g., +91 98792 20919"
+                            value={submittedData.faculty_chairman_mobile}
+                            onChange={(e) => setSubmittedData({ ...submittedData, faculty_chairman_mobile: e.target.value })}
+                            required
+                          />
+                        </label>
+                      </div>
+
+                      <div className="form-section-title">OFFICE USE & DEAN (STUDENTS WELFARE) APPROVALS</div>
+                      <div className="form-grid">
+                        <label className="field">
+                          <span>Office Sanctioned Amount</span>
+                          <input
+                            type="text"
+                            placeholder="Leave blank for manual entry or enter amount"
+                            value={submittedData.office_sanctioned_amount}
+                            onChange={(e) => setSubmittedData({ ...submittedData, office_sanctioned_amount: e.target.value })}
+                          />
+                        </label>
+                        <label className="field">
+                          <span>Office Amount Utilized</span>
+                          <input
+                            type="text"
+                            placeholder="Leave blank or enter utilized amount"
+                            value={submittedData.office_amount_utilized}
+                            onChange={(e) => setSubmittedData({ ...submittedData, office_amount_utilized: e.target.value })}
+                          />
+                        </label>
+                        <label className="field">
+                          <span>Office Current Proposed Amount</span>
+                          <input
+                            type="text"
+                            placeholder="e.g., 1100"
+                            value={submittedData.office_proposed_amount}
+                            onChange={(e) => setSubmittedData({ ...submittedData, office_proposed_amount: e.target.value })}
+                          />
+                        </label>
+                        <label className="field">
+                          <span>Office Balance Amount</span>
+                          <input
+                            type="text"
+                            placeholder="Leave blank or enter balance"
+                            value={submittedData.office_balance_amount}
+                            onChange={(e) => setSubmittedData({ ...submittedData, office_balance_amount: e.target.value })}
+                          />
+                        </label>
+                        <label className="field">
+                          <span>Office Clerk Signature Label</span>
+                          <input
+                            type="text"
+                            placeholder="e.g., Signature (Office Clerk)"
+                            value={submittedData.office_clerk_signature}
+                            onChange={(e) => setSubmittedData({ ...submittedData, office_clerk_signature: e.target.value })}
+                          />
+                        </label>
+                        <label className="field">
+                          <span>Chairman, F&amp; SW</span>
+                          <input
+                            type="text"
+                            placeholder="e.g., Dr. Rakesh Maurya"
+                            value={submittedData.chairman_fsw}
+                            onChange={(e) => setSubmittedData({ ...submittedData, chairman_fsw: e.target.value })}
+                          />
+                        </label>
+                        <label className="field">
+                          <span>Associate Dean (SW)</span>
+                          <input
+                            type="text"
+                            placeholder="e.g., Dr. Manish K Rathod"
+                            value={submittedData.associate_dean_sw}
+                            onChange={(e) => setSubmittedData({ ...submittedData, associate_dean_sw: e.target.value })}
+                          />
+                        </label>
+                        <label className="field">
+                          <span>Dean (Students Welfare)</span>
+                          <input
+                            type="text"
+                            placeholder="e.g., Dr. Sanjay R. Patel"
+                            value={submittedData.dean_sw}
+                            onChange={(e) => setSubmittedData({ ...submittedData, dean_sw: e.target.value })}
                           />
                         </label>
                       </div>

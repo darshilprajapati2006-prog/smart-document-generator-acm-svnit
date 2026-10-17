@@ -12,10 +12,12 @@ from app.schemas.executive_meet import ExecutiveMeetRequest
 from app.schemas.bill_certificate import BillCertificateRequest
 from app.schemas.bill_summary import BillSummaryRequest
 from app.schemas.prize_money_receipt import PrizeMoneyReceiptRequest
+from app.schemas.submitted_doc import SubmittedDocRequest
 from app.services.executive_meet_service import ExecutiveMeetService
 from app.services.bill_certificate_service import BillCertificateService
 from app.services.bill_summary_service import BillSummaryService
 from app.services.prize_money_receipt_service import PrizeMoneyReceiptService
+from app.services.submitted_document_service import SubmittedDocumentService
 from app.utils.file_manager import file_manager, sanitize_filename
 
 from app.core.template_registry import template_registry
@@ -355,6 +357,59 @@ def generate_prize_money_receipt(data: PrizeMoneyReceiptRequest, current_user: D
         )
         # Avoid including receipt/account data in server response errors.
         raise HTTPException(status_code=500, detail="Prize Money Receipt generation failed.")
+
+@router.post("/submitted/generate")
+def generate_submitted_document(data: SubmittedDocRequest, current_user: Dict[str, Any] = Depends(require_role(["author"]))):
+    """Generates and stores the official SVNIT Event Permission & Financial Proposal submitted to Dean SW."""
+    t0 = time.time()
+    user_id = current_user.get("sub")
+    user_role = current_user.get("role")
+    try:
+        doc_id, session_dir = file_manager.create_session()
+        safe_date = sanitize_filename(data.date.replace("/", "-"))
+        docx_filename = f"Submitted_Document_{safe_date}.docx"
+        pdf_filename = f"Submitted_Document_{safe_date}.pdf"
+        docx_path = session_dir / docx_filename
+        pdf_path = session_dir / pdf_filename
+        SubmittedDocumentService.generate_docx(data, docx_path)
+        SubmittedDocumentService.generate_pdf(data, pdf_path)
+        duration_ms = round((time.time() - t0) * 1000, 2)
+
+        doc_record = DocumentRepository.create_document(
+            user_id=user_id,
+            document_type="submitted",
+            title=f"Submitted to Dean SW - {data.event_title}",
+            data=data.model_dump(mode="json"),
+            docx_path=str(docx_path),
+            pdf_path=str(pdf_path),
+            change_summary="Initial generation",
+        )
+        with get_db() as conn:
+            conn.execute("INSERT INTO document_artifacts(artifact_id,document_id,user_id) VALUES(?,?,?)", (doc_id, doc_record["id"], user_id))
+        AnalyticsService.record_event(
+            event_type="document_generated", document_type="submitted",
+            duration_ms=duration_ms, status="success", actor_role=user_role,
+        )
+        return {
+            "success": True,
+            "document_id": doc_id,
+            "repository_id": doc_record.get("id"),
+            "document_type": "submitted",
+            "title": f"Submitted to Dean SW - {data.event_title}",
+            "status": doc_record.get("status", "draft"),
+            "current_version": doc_record.get("current_version", 1),
+            "files": {
+                "docx": {"filename": docx_filename, "download_url": f"/api/documents/download/{doc_id}/docx"},
+                "pdf": {"filename": pdf_filename, "download_url": f"/api/documents/download/{doc_id}/pdf"},
+            },
+        }
+    except Exception as e:
+        duration_ms = round((time.time() - t0) * 1000, 2)
+        AnalyticsService.record_event(
+            event_type="document_generation_failed", document_type="submitted",
+            duration_ms=duration_ms, status="failed", actor_role=user_role,
+        )
+        raise HTTPException(status_code=500, detail=f"Submitted document generation failed: {str(e)}")
 
 @router.get("/download/{doc_id}/{file_format}")
 def download_document(doc_id: str, file_format: str, current_user: Dict[str, Any] = Depends(require_authenticated_user)):

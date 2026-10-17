@@ -127,6 +127,19 @@ export async function generatePrizeMoneyReceipt(payload) {
   return res.json();
 }
 
+export async function generateSubmittedDoc(payload) {
+  const res = await fetch(`${API_BASE_URL}/api/documents/submitted/generate`, {
+    method: "POST",
+    headers: getHeaders(),
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || "Submitted document generation failed.");
+  }
+  return res.json();
+}
+
 // -------------------------------------------------------------
 // Feature 1: Automatic Document-Type Detection
 // -------------------------------------------------------------
