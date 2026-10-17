@@ -51,11 +51,15 @@ class SubmittedDocRequest(BaseModel):
     student_head_roll: str = Field(default="I24AI005", min_length=1, max_length=50)
     student_head_branch: str = Field(default="AI", min_length=1, max_length=50)
     student_head_mobile: str = Field(default="+91 87806 37299", min_length=1, max_length=50)
+    student_head_signature_data: Optional[str] = Field(default=None, max_length=1400000)
+    student_head_signature_confirmed: bool = Field(default=False)
 
     student_secretary_name: str = Field(default="Arshad Khatib", min_length=1, max_length=100)
     student_secretary_roll: str = Field(default="U24AI112", min_length=1, max_length=50)
     student_secretary_branch: str = Field(default="AI", min_length=1, max_length=50)
     student_secretary_mobile: str = Field(default="+91 88060 45005", min_length=1, max_length=50)
+    student_secretary_signature_data: Optional[str] = Field(default=None, max_length=1400000)
+    student_secretary_signature_confirmed: bool = Field(default=False)
 
     # Faculty Signatures
     faculty_co_chairman_name: str = Field(default="Dr. Balu Parne", min_length=1, max_length=100)

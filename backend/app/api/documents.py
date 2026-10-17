@@ -365,6 +365,12 @@ def generate_submitted_document(data: SubmittedDocRequest, current_user: Dict[st
     user_id = current_user.get("sub")
     user_role = current_user.get("role")
     try:
+        data.student_head_signature_data = normalize_lead_signature(
+            data.student_head_signature_data, data.student_head_signature_confirmed
+        )
+        data.student_secretary_signature_data = normalize_lead_signature(
+            data.student_secretary_signature_data, data.student_secretary_signature_confirmed
+        )
         doc_id, session_dir = file_manager.create_session()
         safe_date = sanitize_filename(data.date.replace("/", "-"))
         docx_filename = f"Submitted_Document_{safe_date}.docx"

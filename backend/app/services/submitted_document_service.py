@@ -16,11 +16,23 @@ from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.units import mm, inch
 from reportlab.platypus import (
-    SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, Image, PageBreak, KeepTogether
+    SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, Image as ReportLabImage, PageBreak, KeepTogether
 )
 
 from app.core.config import settings
 from app.schemas.submitted_doc import SubmittedDocRequest
+from app.services.lead_signature_service import lead_signature_stream
+from PIL import Image
+
+
+def _pdf_signature_image(signature_data: str | None):
+    signature_stream = lead_signature_stream(signature_data)
+    if not signature_stream:
+        return None
+    width_px, height_px = Image.open(signature_stream).size
+    signature_stream.seek(0)
+    scale = min((1.8 * inch) / width_px, (0.55 * inch) / height_px)
+    return ReportLabImage(signature_stream, width=width_px * scale, height=height_px * scale)
 
 
 def _set_cell_bg(cell, hex_color: str):
@@ -58,6 +70,21 @@ def _set_table_borders(table, color="B0B7C3"):
 
 
 class SubmittedDocumentService:
+
+    @staticmethod
+    def _add_signature_image(cell, signature_data: str | None):
+        signature_stream = lead_signature_stream(signature_data)
+        if not signature_stream:
+            return
+        with Image.open(signature_stream) as signature_image:
+            ratio = signature_image.width / signature_image.height
+            width = Inches(min(1.8, 1.8 if ratio >= 1 else 1.0 * ratio))
+            height = Inches(min(0.55, 1.8 / ratio if ratio >= 1 else 1.0))
+        signature_stream.seek(0)
+        paragraph = cell.add_paragraph()
+        paragraph.paragraph_format.space_before = Pt(2)
+        paragraph.paragraph_format.space_after = Pt(2)
+        paragraph.add_run().add_picture(signature_stream, width=width, height=height)
 
     @classmethod
     def generate_docx(cls, data: SubmittedDocRequest, output_path: Path):
@@ -240,6 +267,8 @@ class SubmittedDocumentService:
         )
         _set_cell_text(t_sig.rows[0].cells[0], sig_cell_00)
         _set_cell_text(t_sig.rows[0].cells[1], sig_cell_01)
+        cls._add_signature_image(t_sig.rows[0].cells[0], data.student_head_signature_data)
+        cls._add_signature_image(t_sig.rows[0].cells[1], data.student_secretary_signature_data)
         _set_cell_text(t_sig.rows[1].cells[0], sig_cell_10)
         _set_cell_text(t_sig.rows[1].cells[1], sig_cell_11)
 
@@ -439,7 +468,10 @@ class SubmittedDocumentService:
                     f"Branch: {escape(data.student_head_branch)}<br/>"
                     f"Mobile No. {escape(data.student_head_mobile)}",
                     normal
-                ),
+                ) if not data.student_head_signature_data else [
+                    Paragraph(f"<b>Signature of Student Head</b><br/>Name: {escape(data.student_head_name)}<br/>Roll No. {escape(data.student_head_roll)}<br/>Branch: {escape(data.student_head_branch)}<br/>Mobile No. {escape(data.student_head_mobile)}", normal),
+                    _pdf_signature_image(data.student_head_signature_data),
+                ],
                 Paragraph(
                     f"<b>Signature of Student Secretary</b><br/>"
                     f"Name: {escape(data.student_secretary_name)}<br/>"
@@ -447,7 +479,10 @@ class SubmittedDocumentService:
                     f"Branch: {escape(data.student_secretary_branch)}<br/>"
                     f"Mobile No. {escape(data.student_secretary_mobile)}",
                     normal
-                ),
+                ) if not data.student_secretary_signature_data else [
+                    Paragraph(f"<b>Signature of Student Secretary</b><br/>Name: {escape(data.student_secretary_name)}<br/>Roll No. {escape(data.student_secretary_roll)}<br/>Branch: {escape(data.student_secretary_branch)}<br/>Mobile No. {escape(data.student_secretary_mobile)}", normal),
+                    _pdf_signature_image(data.student_secretary_signature_data),
+                ],
             ],
             [
                 Paragraph(

@@ -211,6 +211,28 @@ const mockDemoData = {
     faculty_chairman_title: "Faculty Chairman",
     club_name: "ACM NIT-Surat",
   },
+  prize_money_receipt: {
+    serial_number: "PMR/2026-27/001",
+    date: "17/10/2026",
+    amount_rupees: "5000",
+    competition_name: "ACM Student Innovation Challenge",
+    position: "1st Place",
+    organizing_body: "ACM Student Chapter, SVNIT Surat",
+    event_date: "10/10/2026",
+    venue: "SVNIT Surat",
+    affiliating_institute: "Sardar Vallabhbhai National Institute of Technology, Surat",
+    name_as_per_bank: "Demo Student",
+    bank_name: "State Bank of India",
+    branch: "SVNIT Campus Branch",
+    account_number: "000000000000",
+    ifsc_code: "SBIN0000000",
+    pan_number: "ABCDE1234F",
+    student_name: "Demo Student",
+    roll_number: "DEMO2026",
+    course_semester: "B.Tech. Computer Science, Semester 5",
+    mobile_number: "9999999999",
+    chairman_name: "Dr. Sankita Patel",
+  },
   submitted: {
     ref_no: "ACM/2026-27/SIH/001",
     date: "08/09/2026",
@@ -429,6 +451,10 @@ export default function App() {
   const [execData, setExecData] = useState(emptyExecState);
   const [leadSignature, setLeadSignature] = useState(() => clearLeadSignatureState());
   const leadSignatureInputRef = useRef(null);
+  const [studentHeadSignature, setStudentHeadSignature] = useState(() => clearLeadSignatureState());
+  const studentHeadSignatureInputRef = useRef(null);
+  const [studentSecretarySignature, setStudentSecretarySignature] = useState(() => clearLeadSignatureState());
+  const studentSecretarySignatureInputRef = useRef(null);
   const [billCertData, setBillCertData] = useState(emptyBillCertState);
   const [billSummaryData, setBillSummaryData] = useState(emptyBillSummaryState);
   const [prizeMoneyData, setPrizeMoneyData] = useState(emptyPrizeMoneyState);
@@ -619,6 +645,8 @@ export default function App() {
       setPrizeMoneyData(emptyPrizeMoneyState);
     } else if (selectedType === "submitted") {
       setSubmittedData(emptySubmittedState);
+      setStudentHeadSignature(clearLeadSignatureState());
+      setStudentSecretarySignature(clearLeadSignatureState());
     }
     setReviewState(null);
     setGeneratedResult(null);
@@ -634,6 +662,8 @@ export default function App() {
       setBillCertData({ ...mockDemoData.bill_certificate });
     } else if (selectedType === "bill_summary") {
       setBillSummaryData({ ...mockDemoData.bill_summary });
+    } else if (selectedType === "prize_money_receipt") {
+      setPrizeMoneyData({ ...mockDemoData.prize_money_receipt });
     } else if (selectedType === "submitted") {
       setSubmittedData({ ...mockDemoData.submitted });
     }
@@ -1320,8 +1350,18 @@ export default function App() {
           pan_number: prizeMoneyData.pan_number.trim().toUpperCase(),
         });
       } else if (selectedType === "submitted") {
+        if ((studentHeadSignature.data && !studentHeadSignature.confirmed)
+          || (studentSecretarySignature.data && !studentSecretarySignature.confirmed)) {
+          setError("Confirm authorization for each uploaded student signature before generating the document.");
+          setIsGenerating(false);
+          return;
+        }
         result = await generateSubmittedDoc({
           ...submittedData,
+          student_head_signature_data: studentHeadSignature.confirmed ? studentHeadSignature.data : null,
+          student_head_signature_confirmed: studentHeadSignature.confirmed,
+          student_secretary_signature_data: studentSecretarySignature.confirmed ? studentSecretarySignature.data : null,
+          student_secretary_signature_confirmed: studentSecretarySignature.confirmed,
           financial_items: (submittedData.financial_items || []).map((it) => ({
             item: it.item.trim(),
             amount: Number(it.amount) || 0,
@@ -1970,8 +2010,7 @@ export default function App() {
                         type="button"
                         className="demo-load-btn"
                         onClick={handleLoadMockExample}
-                        disabled={selectedType === "prize_money_receipt"}
-                        title={selectedType === "prize_money_receipt" ? "No sample banking data is provided for this receipt." : "Load demonstration example reference data"}
+                        title="Load demonstration example reference data"
                       >
                         Load Demo Data ⚡
                       </button>
@@ -3008,6 +3047,46 @@ export default function App() {
                             required
                           />
                         </label>
+                        <section className="lead-signature-upload" aria-labelledby="student-head-signature-title">
+                          <div>
+                            <h4 id="student-head-signature-title">Student Head Signature</h4>
+                            <p>Upload a PNG or JPEG image to place in the student head signature area.</p>
+                          </div>
+                          <input
+                            ref={studentHeadSignatureInputRef}
+                            className="visually-hidden"
+                            type="file"
+                            accept="image/png,image/jpeg,.png,.jpg,.jpeg"
+                            onChange={(event) => {
+                              const file = event.target.files?.[0];
+                              event.target.value = "";
+                              if (!file) return;
+                              const fileError = validateLeadSignatureFile(file);
+                              if (fileError) {
+                                setStudentHeadSignature(clearLeadSignatureState(fileError));
+                                return;
+                              }
+                              const reader = new FileReader();
+                              reader.onload = () => setStudentHeadSignature(createLeadSignatureState(String(reader.result || ""), file.name, false));
+                              reader.onerror = () => setStudentHeadSignature(clearLeadSignatureState("Unable to read this image. Please try another file."));
+                              reader.readAsDataURL(file);
+                            }}
+                          />
+                          {hasLeadSignaturePreview(studentHeadSignature) ? (
+                            <div className="lead-signature-preview-wrap">
+                              <img className="lead-signature-preview" src={studentHeadSignature.data} alt="Uploaded student head signature preview" />
+                              <span className="lead-signature-filename">{studentHeadSignature.fileName}</span>
+                            </div>
+                          ) : (
+                            <div className="lead-signature-empty">No signature image uploaded</div>
+                          )}
+                          <div className="lead-signature-actions">
+                            <button type="button" className="secondary-btn" onClick={() => studentHeadSignatureInputRef.current?.click()}>{studentHeadSignature.data ? "Replace Signature" : "Upload Signature"}</button>
+                            {hasLeadSignaturePreview(studentHeadSignature) && <button type="button" className="secondary-btn" onClick={() => setStudentHeadSignature(clearLeadSignatureState())}>Remove Signature</button>}
+                          </div>
+                          {studentHeadSignature.data && <label className="lead-signature-confirm"><input type="checkbox" checked={studentHeadSignature.confirmed} onChange={(event) => setStudentHeadSignature((previous) => ({ ...previous, confirmed: event.target.checked }))} /> <span>I confirm this is the Student Head's signature and authorize its use in this document.</span></label>}
+                          {studentHeadSignature.error && <p className="lead-signature-error" role="alert">{studentHeadSignature.error}</p>}
+                        </section>
 
                         <label className="field">
                           <span>Student Secretary Name *</span>
@@ -3049,6 +3128,46 @@ export default function App() {
                             required
                           />
                         </label>
+                        <section className="lead-signature-upload" aria-labelledby="student-secretary-signature-title">
+                          <div>
+                            <h4 id="student-secretary-signature-title">Student Secretary Signature</h4>
+                            <p>Upload a PNG or JPEG image to place in the student secretary signature area.</p>
+                          </div>
+                          <input
+                            ref={studentSecretarySignatureInputRef}
+                            className="visually-hidden"
+                            type="file"
+                            accept="image/png,image/jpeg,.png,.jpg,.jpeg"
+                            onChange={(event) => {
+                              const file = event.target.files?.[0];
+                              event.target.value = "";
+                              if (!file) return;
+                              const fileError = validateLeadSignatureFile(file);
+                              if (fileError) {
+                                setStudentSecretarySignature(clearLeadSignatureState(fileError));
+                                return;
+                              }
+                              const reader = new FileReader();
+                              reader.onload = () => setStudentSecretarySignature(createLeadSignatureState(String(reader.result || ""), file.name, false));
+                              reader.onerror = () => setStudentSecretarySignature(clearLeadSignatureState("Unable to read this image. Please try another file."));
+                              reader.readAsDataURL(file);
+                            }}
+                          />
+                          {hasLeadSignaturePreview(studentSecretarySignature) ? (
+                            <div className="lead-signature-preview-wrap">
+                              <img className="lead-signature-preview" src={studentSecretarySignature.data} alt="Uploaded student secretary signature preview" />
+                              <span className="lead-signature-filename">{studentSecretarySignature.fileName}</span>
+                            </div>
+                          ) : (
+                            <div className="lead-signature-empty">No signature image uploaded</div>
+                          )}
+                          <div className="lead-signature-actions">
+                            <button type="button" className="secondary-btn" onClick={() => studentSecretarySignatureInputRef.current?.click()}>{studentSecretarySignature.data ? "Replace Signature" : "Upload Signature"}</button>
+                            {hasLeadSignaturePreview(studentSecretarySignature) && <button type="button" className="secondary-btn" onClick={() => setStudentSecretarySignature(clearLeadSignatureState())}>Remove Signature</button>}
+                          </div>
+                          {studentSecretarySignature.data && <label className="lead-signature-confirm"><input type="checkbox" checked={studentSecretarySignature.confirmed} onChange={(event) => setStudentSecretarySignature((previous) => ({ ...previous, confirmed: event.target.checked }))} /> <span>I confirm this is the Student Secretary's signature and authorize its use in this document.</span></label>}
+                          {studentSecretarySignature.error && <p className="lead-signature-error" role="alert">{studentSecretarySignature.error}</p>}
+                        </section>
                       </div>
 
                       <div className="form-section-title">FACULTY SIGNATORIES (PAGE 2)</div>
