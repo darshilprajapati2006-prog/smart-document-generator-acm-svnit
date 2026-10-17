@@ -17,6 +17,7 @@ class BillCertificateRequest(BaseModel):
     original_bill_date: Optional[str] = Field(default="", description="Date of original bill")
     original_bill_rs: Optional[str] = Field(default="", description="Amount of original bill")
     original_bill_ms: Optional[str] = Field(default="", description="M/s Supplier name on original bill")
+    has_original_bill_details: bool = Field(default=False)
     purchase_order_no: str = Field(default="NiL", description="PO number and date or NiL")
     head_of_account: str = Field(default="6/52", description="Head of Account code")
     advance_drawn: str = Field(default="NiL", description="Advance drawn or NiL")
@@ -28,6 +29,9 @@ class BillCertificateRequest(BaseModel):
     has_taxes: Optional[bool] = Field(default=False, description="Flag indicating explicit tax details")
     tax_details: Optional[str] = Field(default="", description="Detailed tax specification (e.g. CGST 9% + SGST 9%)")
     advance_adjustment_notes: Optional[str] = Field(default="", description="Notes regarding advance adjustment if applicable")
+    has_advance_adjustment: bool = Field(default=False)
+    payment_modes: List[str] = Field(default_factory=list)
+    payment_mode_details: Optional[str] = Field(default="", description="Additional payment mode details")
     
     # Supplier Details
     supplier_name: str = Field(description="Name of the vendor/supplier")

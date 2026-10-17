@@ -232,6 +232,12 @@ def generate_bill_summary(data: BillSummaryRequest, current_user: Dict[str, Any]
     user_id = current_user.get("sub")
     user_role = current_user.get("role")
     try:
+        data.student_head_signature_data = normalize_lead_signature(
+            data.student_head_signature_data, data.student_head_signature_confirmed
+        )
+        data.student_secretary_signature_data = normalize_lead_signature(
+            data.student_secretary_signature_data, data.student_secretary_signature_confirmed
+        )
         doc_id, session_dir = file_manager.create_session()
         
         calc_rows, total_prize, total_other, grand_total = BillSummaryService.calculate_totals(data)

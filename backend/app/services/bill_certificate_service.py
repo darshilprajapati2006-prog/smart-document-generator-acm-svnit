@@ -1,4 +1,5 @@
 from pathlib import Path
+from html import escape
 from docx import Document
 from docx.shared import Inches, Pt, RGBColor
 from docx.enum.text import WD_ALIGN_PARAGRAPH
@@ -136,7 +137,18 @@ class BillCertificateService:
         r_t.font.size = Pt(11)
 
         # Metadata table
-        meta_table = doc.add_table(rows=4, cols=2)
+        meta_rows = [
+            (f"Chapter Name: {data.chapter_name}", f"Code No.: {data.code_no}"),
+            (f"Approval Note No.: {data.approval_note_no}", f"Date: {data.date}"),
+            (f"Purchase Order No. & date: {data.purchase_order_no}", f"Head of Account: {data.head_of_account}"),
+            (f"Advance drawn in Rs.: {data.advance_drawn}", ""),
+        ]
+        if data.has_original_bill_details or any((data.original_approval_sent_with_bill_no, data.original_bill_date, data.original_bill_rs, data.original_bill_ms)):
+            meta_rows.extend([
+                (f"Original approval sent with bill no.: {data.original_approval_sent_with_bill_no or '-'}", f"Original bill date: {data.original_bill_date or '-'}"),
+                (f"Original bill amount (Rs.): {data.original_bill_rs or '-'}", f"Original bill M/s: {data.original_bill_ms or '-'}"),
+            ])
+        meta_table = doc.add_table(rows=len(meta_rows), cols=2)
         meta_table.alignment = WD_TABLE_ALIGNMENT.CENTER
         meta_table.autofit = False
         mw = [Inches(4.5), Inches(2.7)]
@@ -152,10 +164,9 @@ class BillCertificateService:
             p_r.paragraph_format.space_after = Pt(1)
             p_r.add_run(right_txt).font.size = Pt(8.5)
 
-        set_meta(meta_table.rows[0], f"Chapter Name: {data.chapter_name}", f"Code No.: {data.code_no}")
-        set_meta(meta_table.rows[1], f"Approval Note No.: {data.approval_note_no}", f"Date: {data.date}")
-        set_meta(meta_table.rows[2], f"Purchase Order No. & date: {data.purchase_order_no}", f"Head of Account: {data.head_of_account}")
-        set_meta(meta_table.rows[3], f"Advance drawn in Rs.: {data.advance_drawn}", "")
+        for idx, (left_text, right_text) in enumerate(meta_rows):
+            set_meta(meta_table.rows[idx], left_text, right_text)
+        add_table_borders(meta_table)
 
         # Certification quote
         p_cert = doc.add_paragraph()
@@ -244,6 +255,15 @@ class BillCertificateService:
         add_table_borders(items_table)
 
         # Supplier & Payment Details side-by-side or stacked
+        if data.has_advance_adjustment or data.advance_adjustment_notes:
+            adjustment = doc.add_table(rows=1, cols=1)
+            adjustment.alignment = WD_TABLE_ALIGNMENT.CENTER
+            set_cell_margins(adjustment.rows[0].cells[0], 70, 70, 90, 90)
+            adjustment.rows[0].cells[0].paragraphs[0].add_run(
+                f"Advance Adjustment: {data.advance_adjustment_notes or '-'}"
+            ).font.size = Pt(8)
+            add_table_borders(adjustment)
+
         doc.add_paragraph().paragraph_format.space_before = Pt(4)
         
         details_table = doc.add_table(rows=1, cols=2)
@@ -313,11 +333,12 @@ class BillCertificateService:
             p.add_run(h).bold = True
             p.runs[0].font.size = Pt(8)
 
+        chosen_register = data.register_type or "Recurring Register"
         stk_rows = [
-            ("Name/Type", "Recurring", "Consumable", "Miscellaneous"),
+            ("Register Type", "[X]" if chosen_register == "Recurring Register" else "[ ]", "[X]" if chosen_register == "Consumable Register" else "[ ]", "[X]" if chosen_register == "Miscellaneous Register" else "[ ]"),
             ("Serial Number", data.serial_number or "-", "-", "-"),
             ("Page Number", data.page_number or "-", "-", "-"),
-            ("Date & Signature", f"Date: {data.stock_date or data.date}\nClerk: {data.clerk_name or ''}", "", "")
+            ("Date & Signature", f"Date: {data.stock_date or data.date}\nClerk: {data.clerk_name or ''}" if chosen_register == "Recurring Register" else "", f"Date: {data.stock_date or data.date}\nClerk: {data.clerk_name or ''}" if chosen_register == "Consumable Register" else "", f"Date: {data.stock_date or data.date}\nClerk: {data.clerk_name or ''}" if chosen_register == "Miscellaneous Register" else "")
         ]
         for ri, row_data in enumerate(stk_rows, start=1):
             for ci, txt in enumerate(row_data):
@@ -358,7 +379,7 @@ class BillCertificateService:
         p_rec.add_run("Recommendation (Head of the Department)\n").bold = True
         p_rec.runs[0].font.size = Pt(9.5)
         p_rec.add_run(
-            f"Recommended Amount: Rs. {grand_total:.2f}\n"
+            f"Recommended Amount: Rs. {float(data.recommended_amount) if data.recommended_amount is not None else grand_total:.2f}\n"
             "Approved and Recommended for Bill Payment\n\n"
             "Date: _______________                       Dean Student Welfare: _______________"
         ).font.size = Pt(8.5)
@@ -375,10 +396,14 @@ class BillCertificateService:
         c_acc = acc_box.rows[0].cells[0]
         set_cell_margins(c_acc, 80, 80, 80, 80)
         p_ab = c_acc.paragraphs[0]
+        payment_options = ["Cash", "Cheque", "Online", "Adjusted Against Advance"]
+        payment_modes = "  ".join(
+            f"{'[X]' if mode in data.payment_modes else '[ ]'} {mode}" for mode in payment_options
+        )
         p_ab.add_run(
             f"Date: _______________   Head of Account: {data.head_of_account}   Budget Code No.: {data.code_no}\n"
-            "Mode of Payment: Cash / Cheque / Online / Adjusted Against Advance\n"
-            "Details of Mode of Payment: __________________________________________\n"
+            f"Mode of Payment: {payment_modes}\n"
+            f"Details of Mode of Payment: {data.payment_mode_details or '__________________________________________'}\n"
             f"Passed for payment/adjustment of Amount in (Rs.): {grand_total:.2f}\n\n"
             "Signatures:\n\n"
             "Office Supt.                    Dy. Registrar (A/cs.)                    Registrar/Director"
@@ -448,28 +473,40 @@ class BillCertificateService:
 
         # Metadata
         meta_data = [
-            [Paragraph(f"<b>Chapter Name:</b> {data.chapter_name}", body), Paragraph(f"<b>Code No.:</b> {data.code_no}", body)],
-            [Paragraph(f"<b>Approval Note No.:</b> {data.approval_note_no}", body), Paragraph(f"<b>Date:</b> {data.date}", body)],
-            [Paragraph(f"<b>Purchase Order No. & date:</b> {data.purchase_order_no}", body), Paragraph(f"<b>Head of Account:</b> {data.head_of_account}", body)],
-            [Paragraph(f"<b>Advance drawn in Rs.:</b> {data.advance_drawn}", body), Paragraph("", body)]
+            [Paragraph(f"<b>Chapter Name:</b> {escape(data.chapter_name)}", body), Paragraph(f"<b>Code No.:</b> {escape(data.code_no)}", body)],
+            [Paragraph(f"<b>Approval Note No.:</b> {escape(data.approval_note_no)}", body), Paragraph(f"<b>Date:</b> {escape(data.date)}", body)],
+            [Paragraph(f"<b>Purchase Order No. &amp; date:</b> {escape(data.purchase_order_no)}", body), Paragraph(f"<b>Head of Account:</b> {escape(data.head_of_account)}", body)],
+            [Paragraph(f"<b>Advance drawn in Rs.:</b> {escape(data.advance_drawn)}", body), Paragraph("", body)]
         ]
+        if data.has_original_bill_details or any((data.original_approval_sent_with_bill_no, data.original_bill_date, data.original_bill_rs, data.original_bill_ms)):
+            meta_data.extend([
+                [Paragraph(f"<b>Original approval sent with bill no.:</b> {escape(data.original_approval_sent_with_bill_no or '-')}", body), Paragraph(f"<b>Original bill date:</b> {escape(data.original_bill_date or '-')}", body)],
+                [Paragraph(f"<b>Original bill amount (Rs.):</b> {escape(data.original_bill_rs or '-')}", body), Paragraph(f"<b>Original bill M/s:</b> {escape(data.original_bill_ms or '-')}", body)],
+            ])
         meta_tbl = Table(meta_data, colWidths=[4.6*inch, 2.8*inch])
         meta_tbl.setStyle(TableStyle([
+            ('BOX', (0,0), (-1,-1), 0.8, colors.HexColor("#94a3b8")),
+            ('INNERGRID', (0,0), (-1,-1), 0.5, colors.HexColor("#cbd5e1")),
             ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
             ('TOPPADDING', (0,0), (-1,-1), 1),
             ('BOTTOMPADDING', (0,0), (-1,-1), 1),
-            ('LEFTPADDING', (0,0), (-1,-1), 0),
+            ('LEFTPADDING', (0,0), (-1,-1), 5),
+            ('RIGHTPADDING', (0,0), (-1,-1), 5),
         ]))
         story.append(meta_tbl)
         story.append(Spacer(1, 4))
 
         # Certificate statement
         cert_text = (
-            f'<i>“I, am {data.certifier_name}, personally satisfied that the goods (described below) purchased are '
+            f'<i>“I, am {escape(data.certifier_name)}, personally satisfied that the goods (described below) purchased are '
             f'of the requisite quality and specification and have been purchased from a reliable supplier / '
             f'contractor at a reasonable price.”</i>'
         )
-        story.append(Paragraph(cert_text, body))
+        story.append(Table([[Paragraph(cert_text, body)]], colWidths=[7.4*inch], style=TableStyle([
+            ('BOX', (0,0), (-1,-1), 0.8, colors.HexColor("#94a3b8")),
+            ('LEFTPADDING', (0,0), (-1,-1), 6), ('RIGHTPADDING', (0,0), (-1,-1), 6),
+            ('TOPPADDING', (0,0), (-1,-1), 5), ('BOTTOMPADDING', (0,0), (-1,-1), 5),
+        ])))
         story.append(Spacer(1, 5))
 
         # Items Table
@@ -485,7 +522,7 @@ class BillCertificateService:
         for itm in calc_items:
             item_rows.append([
                 Paragraph(str(itm["sr_no"]), body_center),
-                Paragraph(itm["name"], body),
+                Paragraph(escape(itm["name"]), body),
                 Paragraph(str(itm["quantity"]), body_center),
                 Paragraph(f"{itm['unit_cost']:.2f}", body_right),
                 Paragraph(f"{itm['total_cost']:.2f}", body_right),
@@ -526,20 +563,20 @@ class BillCertificateService:
         # Supplier & Payment Side-by-side
         sup_lines = [
             "<b>SUPPLIER DETAILS</b>",
-            f"Name: {data.supplier_name}",
-            f"GST No.: {data.supplier_gst or '-'}",
-            f"Any other Taxes: {data.any_other_taxes or '-'}",
-            f"Invoice No. & Date: {data.invoice_no_and_date or '-'}",
+            f"Name: {escape(data.supplier_name)}",
+            f"GST No.: {escape(data.supplier_gst or '-')} ",
+            f"Any other Taxes: {escape(data.any_other_taxes or '-')}",
+            f"Invoice No. & Date: {escape(data.invoice_no_and_date or '-')}",
             f"Amount: Rs. {grand_total:.2f}"
         ]
         pay_lines = [
             "<b>PAYMENT DETAILS</b>",
-            f"Party Name: {data.party_name or data.supplier_name}",
-            f"Account Number: {data.account_number or '-'}",
-            f"Account Holder: {data.account_holder_name or '-'}",
-            f"Bank: {data.bank_name or '-'}",
-            f"Branch: {data.branch_name or '-'}",
-            f"IFSC Code: {data.ifsc_code or '-'}"
+            f"Party Name: {escape(data.party_name or data.supplier_name)}",
+            f"Account Number: {escape(data.account_number or '-')}",
+            f"Account Holder: {escape(data.account_holder_name or '-')}",
+            f"Bank: {escape(data.bank_name or '-')}",
+            f"Branch: {escape(data.branch_name or '-')}",
+            f"IFSC Code: {escape(data.ifsc_code or '-')}"
         ]
 
         details_pdf = Table([
@@ -555,15 +592,28 @@ class BillCertificateService:
             ('RIGHTPADDING', (0,0), (-1,-1), 6),
         ]))
         story.append(details_pdf)
+        if data.has_advance_adjustment or data.advance_adjustment_notes:
+            story.append(Spacer(1, 4))
+            adjustment_pdf = Table([[Paragraph(f"<b>Advance Adjustment:</b> {escape(data.advance_adjustment_notes or '-')}", body)]], colWidths=[7.4*inch])
+            adjustment_pdf.setStyle(TableStyle([
+                ('BOX', (0,0), (-1,-1), 0.8, colors.HexColor("#94a3b8")),
+                ('LEFTPADDING', (0,0), (-1,-1), 6), ('RIGHTPADDING', (0,0), (-1,-1), 6),
+                ('TOPPADDING', (0,0), (-1,-1), 5), ('BOTTOMPADDING', (0,0), (-1,-1), 5),
+            ]))
+            story.append(adjustment_pdf)
 
         # PAGE 2
         story.append(PageBreak())
 
         story.append(Paragraph("<b>STOCK ENTRY DETAILS</b>", body_bold))
         story.append(Spacer(1, 2))
-        story.append(Paragraph(f"Name of the Laboratory / Office: <b>{data.lab_office}</b>", body))
+        story.append(Paragraph(f"Name of the Laboratory / Office: <b>{escape(data.lab_office)}</b>", body))
         story.append(Spacer(1, 4))
 
+        chosen_register = data.register_type or "Recurring Register"
+        register_markers = ["[X]" if chosen_register == register_name else "[ ]" for register_name in ("Recurring Register", "Consumable Register", "Miscellaneous Register")]
+        stock_details = f"Date: {escape(data.stock_date or data.date)}<br/>Staff: {escape(data.clerk_name or '')}"
+        stock_data_cells = [stock_details if chosen_register == register_name else "" for register_name in ("Recurring Register", "Consumable Register", "Miscellaneous Register")]
         stk_data = [
             [
                 Paragraph("", body),
@@ -571,14 +621,14 @@ class BillCertificateService:
                 Paragraph("<b>Consumable Register</b>", body_center),
                 Paragraph("<b>Miscellaneous Register</b>", body_center)
             ],
-            [Paragraph("Name/Type", body_bold), Paragraph("Recurring", body_center), Paragraph("Consumable", body_center), Paragraph("Miscellaneous", body_center)],
-            [Paragraph("Serial Number", body_bold), Paragraph(data.serial_number or "-", body_center), Paragraph("-", body_center), Paragraph("-", body_center)],
-            [Paragraph("Page Number", body_bold), Paragraph(data.page_number or "-", body_center), Paragraph("-", body_center), Paragraph("-", body_center)],
-            [Paragraph("Date & Signature", body_bold), Paragraph(f"Date: {data.stock_date or data.date}<br/>Staff: {data.clerk_name or ''}", body), Paragraph("", body), Paragraph("", body)],
+            [Paragraph("Selected Register", body_bold), *[Paragraph(marker, body_center) for marker in register_markers]],
+            [Paragraph("Serial Number", body_bold), *[Paragraph(escape(data.serial_number or "-"), body_center) if chosen_register == register_name else Paragraph("-", body_center) for register_name in ("Recurring Register", "Consumable Register", "Miscellaneous Register")]],
+            [Paragraph("Page Number", body_bold), *[Paragraph(escape(data.page_number or "-"), body_center) if chosen_register == register_name else Paragraph("-", body_center) for register_name in ("Recurring Register", "Consumable Register", "Miscellaneous Register")]],
+            [Paragraph("Date & Signature", body_bold), *[Paragraph(cell, body) for cell in stock_data_cells]],
         ]
         stk_table_pdf = Table(stk_data, colWidths=[1.8*inch, 1.85*inch, 1.85*inch, 1.9*inch])
         stk_table_pdf.setStyle(TableStyle([
-            ('BACKGROUND', (0,0), (-1,0), colors.HexColor("#f1f5f9")),
+            ('BACKGROUND', (0,0), (-1,1), colors.HexColor("#f1f5f9")),
             ('BOX', (0,0), (-1,-1), 1, colors.HexColor("#94a3b8")),
             ('INNERGRID', (0,0), (-1,-1), 0.5, colors.HexColor("#cbd5e1")),
             ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
@@ -593,12 +643,12 @@ class BillCertificateService:
         story.append(Spacer(1, 2))
         ind_data = [
             [
-                Paragraph(f"Name: <b>{data.indenter_name}</b><br/>Designation: {data.indenter_designation}<br/>Department: {data.indenter_department}", body),
+                Paragraph(f"Name: <b>{escape(data.indenter_name)}</b><br/>Designation: {escape(data.indenter_designation)}<br/>Department: {escape(data.indenter_department)}", body),
                 Paragraph("<br/><br/>Signature with Date: ___________________", body)
             ]
         ]
         ind_tbl = Table(ind_data, colWidths=[4.6*inch, 2.8*inch])
-        ind_tbl.setStyle(TableStyle([('VALIGN', (0,0), (-1,-1), 'TOP')]))
+        ind_tbl.setStyle(TableStyle([('BOX', (0,0), (-1,-1), 0.8, colors.HexColor("#94a3b8")), ('INNERGRID', (0,0), (-1,-1), 0.5, colors.HexColor("#cbd5e1")), ('VALIGN', (0,0), (-1,-1), 'TOP'), ('LEFTPADDING', (0,0), (-1,-1), 6), ('RIGHTPADDING', (0,0), (-1,-1), 6), ('TOPPADDING', (0,0), (-1,-1), 5), ('BOTTOMPADDING', (0,0), (-1,-1), 5)]))
         story.append(ind_tbl)
         story.append(Spacer(1, 10))
 
@@ -607,29 +657,43 @@ class BillCertificateService:
         story.append(Spacer(1, 2))
         rec_data = [
             [
-                Paragraph(f"Recommended Amount: <b>Rs. {grand_total:.2f}</b><br/>Approved and Recommended for Bill Payment<br/><br/>Date: _______________", body),
+                Paragraph(f"Recommended Amount: <b>Rs. {float(data.recommended_amount) if data.recommended_amount is not None else grand_total:.2f}</b><br/>Approved and Recommended for Bill Payment<br/><br/>Date: _______________", body),
                 Paragraph("<br/><br/>Dean Student Welfare: ___________________", body)
             ]
         ]
         rec_tbl = Table(rec_data, colWidths=[4.6*inch, 2.8*inch])
-        rec_tbl.setStyle(TableStyle([('VALIGN', (0,0), (-1,-1), 'TOP')]))
+        rec_tbl.setStyle(TableStyle([('BOX', (0,0), (-1,-1), 0.8, colors.HexColor("#94a3b8")), ('INNERGRID', (0,0), (-1,-1), 0.5, colors.HexColor("#cbd5e1")), ('VALIGN', (0,0), (-1,-1), 'TOP'), ('LEFTPADDING', (0,0), (-1,-1), 6), ('RIGHTPADDING', (0,0), (-1,-1), 6), ('TOPPADDING', (0,0), (-1,-1), 6), ('BOTTOMPADDING', (0,0), (-1,-1), 6)]))
         story.append(rec_tbl)
         story.append(Spacer(1, 10))
 
         # Account section
         story.append(Paragraph("<b>(FOR USE IN ACCOUNT SECTION)</b>", body_bold))
         story.append(Spacer(1, 3))
-        acc_text = (
-            f"Date: _______________   Head of Account: <b>{data.head_of_account}</b>   Budget Code No.: <b>{data.code_no}</b><br/>"
-            "Mode of Payment: Cash / Cheque / Online / Adjusted Against Advance<br/>"
-            "Details of Mode of Payment: __________________________________________<br/>"
-            f"Passed for payment/adjustment of Amount in (Rs.): <b>{grand_total:.2f}</b><br/><br/><br/>"
-            "Office Supt. &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; Dy. Registrar (A/cs.) &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; Registrar/Director"
-        )
-        acc_box_pdf = Table([[Paragraph(acc_text, body)]], colWidths=[7.4*inch])
+        mode_options = ["Cash", "Cheque", "Online", "Adjusted Against Advance"]
+        mode_choices = "   ".join(f"{'[X]' if mode in data.payment_modes else '[ ]'} {mode}" for mode in mode_options)
+        acc_data = [
+            [Paragraph("<b>Date</b>", body_bold), Paragraph("________________", body), Paragraph("<b>Head of Account</b>", body_bold), Paragraph(escape(data.head_of_account), body)],
+            [Paragraph("<b>Budget Code No.</b>", body_bold), Paragraph(escape(data.code_no), body), Paragraph("<b>Amount Passed (Rs.)</b>", body_bold), Paragraph(f"{grand_total:.2f}", body_right_bold)],
+            [Paragraph("<b>Mode of Payment</b>", body_bold), Paragraph(escape(mode_choices), body), "", ""],
+            [Paragraph("<b>Payment Details</b>", body_bold), Paragraph(escape(data.payment_mode_details or "_______________________________________________"), body), "", ""],
+            [Paragraph("<b>Signatures</b>", body_bold), Paragraph("Office Supt.", body_center), Paragraph("Dy. Registrar (A/cs.)", body_center), Paragraph("Registrar / Director", body_center)],
+            [Paragraph("", body), Paragraph("________________", body_center), Paragraph("________________", body_center), Paragraph("________________", body_center)],
+        ]
+        acc_box_pdf = Table(acc_data, colWidths=[1.35*inch, 2.05*inch, 1.65*inch, 2.35*inch])
         acc_box_pdf.setStyle(TableStyle([
             ('BOX', (0,0), (-1,-1), 1, colors.HexColor("#94a3b8")),
+            ('INNERGRID', (0,0), (-1,-1), 0.5, colors.HexColor("#cbd5e1")),
+            ('SPAN', (1,2), (3,2)),
+            ('SPAN', (1,3), (3,3)),
+            ('SPAN', (1,4), (1,4)),
+            ('SPAN', (2,4), (2,4)),
+            ('SPAN', (3,4), (3,4)),
+            ('SPAN', (0,5), (0,5)),
+            ('SPAN', (1,5), (1,5)),
+            ('SPAN', (2,5), (2,5)),
+            ('SPAN', (3,5), (3,5)),
             ('BACKGROUND', (0,0), (-1,-1), colors.HexColor("#fcfcfc")),
+            ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
             ('TOPPADDING', (0,0), (-1,-1), 6),
             ('BOTTOMPADDING', (0,0), (-1,-1), 8),
             ('LEFTPADDING', (0,0), (-1,-1), 8),

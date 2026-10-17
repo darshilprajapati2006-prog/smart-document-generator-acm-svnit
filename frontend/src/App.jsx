@@ -138,10 +138,17 @@ const mockDemoData = {
     chapter_name: "ACM",
     code_no: "6/52",
     approval_note_no: "ACM/2026-27/SIH/001",
+    original_approval_sent_with_bill_no: "",
+    original_bill_date: "",
+    original_bill_rs: "",
+    original_bill_ms: "",
+    has_original_bill_details: false,
     date: "08/09/2026",
     purchase_order_no: "NiL",
     head_of_account: "6/52",
     advance_drawn: "NiL",
+    advance_adjustment_notes: "",
+    has_advance_adjustment: false,
     certifier_name: "Dr. Sankita J. Patel",
     items: [
       { name: "Executive Meet Stage Backdrop & Banner", quantity: 1, unit_cost: 1200 },
@@ -160,6 +167,8 @@ const mockDemoData = {
     bank_name: "State Bank of India",
     branch_name: "SVNIT Campus Branch",
     ifsc_code: "SBIN0003320",
+    payment_modes: [],
+    payment_mode_details: "",
     lab_office: "Student Council",
     register_type: "Recurring Register",
     serial_number: "04",
@@ -326,7 +335,14 @@ const emptyBillCertState = {
   date: "",
   purchase_order_no: "",
   head_of_account: "",
+  original_approval_sent_with_bill_no: "",
+  original_bill_date: "",
+  original_bill_rs: "",
+  original_bill_ms: "",
+  has_original_bill_details: false,
   advance_drawn: "",
+  advance_adjustment_notes: "",
+  has_advance_adjustment: false,
   certifier_name: "",
   title: "",
   items: [{ name: "", quantity: "", unit_cost: "" }],
@@ -343,12 +359,15 @@ const emptyBillCertState = {
   bank_name: "",
   branch_name: "",
   ifsc_code: "",
+  payment_modes: [],
+  payment_mode_details: "",
   lab_office: "",
   register_type: "Recurring Register",
   serial_number: "",
   page_number: "",
   stock_date: "",
   clerk_name: "",
+  recommended_amount: "",
   indenter_name: "",
   indenter_designation: "",
   indenter_department: "",
@@ -457,6 +476,10 @@ export default function App() {
   const studentSecretarySignatureInputRef = useRef(null);
   const [billCertData, setBillCertData] = useState(emptyBillCertState);
   const [billSummaryData, setBillSummaryData] = useState(emptyBillSummaryState);
+  const [billStudentHeadSignature, setBillStudentHeadSignature] = useState(() => clearLeadSignatureState());
+  const billStudentHeadSignatureInputRef = useRef(null);
+  const [billStudentSecretarySignature, setBillStudentSecretarySignature] = useState(() => clearLeadSignatureState());
+  const billStudentSecretarySignatureInputRef = useRef(null);
   const [prizeMoneyData, setPrizeMoneyData] = useState(emptyPrizeMoneyState);
   const [submittedData, setSubmittedData] = useState(emptySubmittedState);
 
@@ -641,6 +664,8 @@ export default function App() {
       setBillCertData(emptyBillCertState);
     } else if (selectedType === "bill_summary") {
       setBillSummaryData(emptyBillSummaryState);
+      setBillStudentHeadSignature(clearLeadSignatureState());
+      setBillStudentSecretarySignature(clearLeadSignatureState());
     } else if (selectedType === "prize_money_receipt") {
       setPrizeMoneyData(emptyPrizeMoneyState);
     } else if (selectedType === "submitted") {
@@ -1118,9 +1143,16 @@ export default function App() {
           { label: "Chapter Name & Code", value: `${billCertData.chapter_name || "ACM"} (${billCertData.code_no || "6/52"})` },
           { label: "Approval Note No.", value: billCertData.approval_note_no || "NiL" },
           { label: "Document Date", value: billCertData.date || "[Current Date]" },
+          { label: "Purchase Order / Head of Account", value: `${billCertData.purchase_order_no || "NiL"} / ${billCertData.head_of_account || "-"}` },
+          { label: "Advance Drawn", value: billCertData.advance_drawn || "NiL" },
+          ...(billCertData.has_original_bill_details ? [{ label: "Original Bill", value: `${billCertData.original_approval_sent_with_bill_no || "-"} · ${billCertData.original_bill_date || "-"} · ₹${billCertData.original_bill_rs || "-"} · ${billCertData.original_bill_ms || "-"}` }] : []),
           { label: "Supplier Name", value: billCertData.supplier_name },
           { label: "Invoice No. & Date", value: billCertData.invoice_no_and_date || "N/A" },
           { label: "Beneficiary Party", value: billCertData.party_name || billCertData.supplier_name },
+          { label: "Payment Mode", value: billCertData.payment_modes.join(", ") || "Not specified" },
+          ...(billCertData.has_advance_adjustment ? [{ label: "Advance Adjustment", value: billCertData.advance_adjustment_notes || "-" }] : []),
+          { label: "Stock Register", value: `${billCertData.register_type} · ${billCertData.serial_number || "-"} · Page ${billCertData.page_number || "-"}` },
+          { label: "Indenter", value: `${billCertData.indenter_name} · ${billCertData.indenter_designation} · ${billCertData.indenter_department}` },
           {
             label: "Bank Account",
             value: billCertData.account_number ? `${billCertData.account_number} (${billCertData.bank_name || "-"})` : "[Unspecified]",
@@ -1302,6 +1334,7 @@ export default function App() {
           code_no: billCertData.code_no.trim() || "6/52",
           approval_note_no: billCertData.approval_note_no.trim() || "ACM/2026-27/BILL/001",
           certifier_name: billCertData.certifier_name.trim() || "Faculty Chairman",
+          recommended_amount: billCertData.recommended_amount === "" ? null : Number(billCertData.recommended_amount),
           items: billCertData.items.map((itm) => ({
             name: itm.name.trim(),
             quantity: Number(itm.quantity) || 1,
@@ -1317,10 +1350,20 @@ export default function App() {
           setIsGenerating(false);
           return;
         }
+        if ((billStudentHeadSignature.data && !billStudentHeadSignature.confirmed)
+          || (billStudentSecretarySignature.data && !billStudentSecretarySignature.confirmed)) {
+          setError("Confirm authorization for each uploaded student signature before generating the document.");
+          setIsGenerating(false);
+          return;
+        }
 
         const todayFormatted = new Date().toISOString().split("T")[0].split("-").reverse().join("/");
         result = await generateBillSummary({
           ...billSummaryData,
+          student_head_signature_data: billStudentHeadSignature.confirmed ? billStudentHeadSignature.data : null,
+          student_head_signature_confirmed: billStudentHeadSignature.confirmed,
+          student_secretary_signature_data: billStudentSecretarySignature.confirmed ? billStudentSecretarySignature.data : null,
+          student_secretary_signature_confirmed: billStudentSecretarySignature.confirmed,
           date: billSummaryData.date.trim() || todayFormatted,
           title: billSummaryData.title.trim() || "BILL SUMMARY",
           subtitle: billSummaryData.subtitle.trim() || "Reimbursement Summary",
@@ -2399,6 +2442,10 @@ export default function App() {
                           />
                         </label>
                         <label className="field">
+                          <span>Purchase Order Number & Date</span>
+                          <input type="text" placeholder="e.g., PO/2026/014 dtd 08/09/2026 or NiL" value={billCertData.purchase_order_no} onChange={(e) => setBillCertData({ ...billCertData, purchase_order_no: e.target.value })} />
+                        </label>
+                        <label className="field">
                           <span>Head of Account</span>
                           <input
                             type="text"
@@ -2406,6 +2453,10 @@ export default function App() {
                             value={billCertData.head_of_account}
                             onChange={(e) => setBillCertData({ ...billCertData, head_of_account: e.target.value })}
                           />
+                        </label>
+                        <label className="field">
+                          <span>Advance Drawn (₹)</span>
+                          <input type="text" placeholder="e.g., NiL or 5000" value={billCertData.advance_drawn} onChange={(e) => setBillCertData({ ...billCertData, advance_drawn: e.target.value })} />
                         </label>
                         <label className="field">
                           <span>Certifier Name</span>
@@ -2416,6 +2467,26 @@ export default function App() {
                             onChange={(e) => setBillCertData({ ...billCertData, certifier_name: e.target.value })}
                           />
                         </label>
+                      </div>
+
+                      <div className="dynamic-section-box">
+                        <label className="section-toggle-label">
+                          <input type="checkbox" checked={billCertData.has_original_bill_details} onChange={(e) => setBillCertData((previous) => ({ ...previous, has_original_bill_details: e.target.checked, ...(e.target.checked ? {} : { original_approval_sent_with_bill_no: "", original_bill_date: "", original_bill_rs: "", original_bill_ms: "" }) }))} />
+                          <span>Include original bill / comparative statement details</span>
+                        </label>
+                        {billCertData.has_original_bill_details && <div className="form-grid" style={{ marginTop: 10 }}>
+                          <label className="field"><span>Original Approval Sent with Bill No.</span><input type="text" value={billCertData.original_approval_sent_with_bill_no} onChange={(e) => setBillCertData({ ...billCertData, original_approval_sent_with_bill_no: e.target.value })} /></label>
+                          <label className="field"><span>Original Bill Date</span><input type="text" placeholder="DD/MM/YYYY" value={billCertData.original_bill_date} onChange={(e) => setBillCertData({ ...billCertData, original_bill_date: e.target.value })} /></label>
+                          <label className="field"><span>Original Bill Amount (₹)</span><input type="text" inputMode="decimal" value={billCertData.original_bill_rs} onChange={(e) => setBillCertData({ ...billCertData, original_bill_rs: e.target.value })} /></label>
+                          <label className="field"><span>Supplier (M/s) on Original Bill</span><input type="text" value={billCertData.original_bill_ms} onChange={(e) => setBillCertData({ ...billCertData, original_bill_ms: e.target.value })} /></label>
+                        </div>}
+                      </div>
+                      <div className="dynamic-section-box">
+                        <label className="section-toggle-label">
+                          <input type="checkbox" checked={billCertData.has_advance_adjustment} onChange={(e) => setBillCertData((previous) => ({ ...previous, has_advance_adjustment: e.target.checked, ...(e.target.checked ? {} : { advance_adjustment_notes: "" }) }))} />
+                          <span>Include advance adjustment details</span>
+                        </label>
+                        {billCertData.has_advance_adjustment && <label className="field full-width" style={{ marginTop: 10 }}><span>Advance Adjustment Notes</span><textarea rows={2} value={billCertData.advance_adjustment_notes} onChange={(e) => setBillCertData({ ...billCertData, advance_adjustment_notes: e.target.value })} /></label>}
                       </div>
 
                       <div className="form-section-title">PURCHASED ITEMS & FINANCIALS</div>
@@ -2551,6 +2622,10 @@ export default function App() {
                           />
                         </label>
                         <label className="field">
+                          <span>Any Other Taxes</span>
+                          <input type="text" placeholder="e.g., Nil / other tax details" value={billCertData.any_other_taxes} onChange={(e) => setBillCertData({ ...billCertData, any_other_taxes: e.target.value })} />
+                        </label>
+                        <label className="field">
                           <span>Invoice No. & Date</span>
                           <input
                             type="text"
@@ -2569,6 +2644,14 @@ export default function App() {
                           />
                         </label>
                         <label className="field">
+                          <span>Name of the Party / Beneficiary</span>
+                          <input type="text" placeholder="Defaults to supplier name" value={billCertData.party_name} onChange={(e) => setBillCertData({ ...billCertData, party_name: e.target.value })} />
+                        </label>
+                        <label className="field">
+                          <span>Account Holder Name</span>
+                          <input type="text" value={billCertData.account_holder_name} onChange={(e) => setBillCertData({ ...billCertData, account_holder_name: e.target.value })} />
+                        </label>
+                        <label className="field">
                           <span>Bank Name</span>
                           <input
                             type="text"
@@ -2576,6 +2659,10 @@ export default function App() {
                             value={billCertData.bank_name}
                             onChange={(e) => setBillCertData({ ...billCertData, bank_name: e.target.value })}
                           />
+                        </label>
+                        <label className="field">
+                          <span>Branch Name</span>
+                          <input type="text" value={billCertData.branch_name} onChange={(e) => setBillCertData({ ...billCertData, branch_name: e.target.value })} />
                         </label>
                         <label className="field">
                           <span>IFSC Code</span>
@@ -2586,6 +2673,33 @@ export default function App() {
                             onChange={(e) => setBillCertData({ ...billCertData, ifsc_code: e.target.value })}
                           />
                         </label>
+                      </div>
+
+                      <div className="form-section-title">PAYMENT METHOD</div>
+                      <div className="dynamic-section-box">
+                        <div className="section-toggle-label"><span>Mode of Payment (select all that apply)</span></div>
+                        <div className="form-grid">
+                          {["Cash", "Cheque", "Online", "Adjusted Against Advance"].map((mode) => (
+                            <label className="section-toggle-label" key={mode}>
+                              <input type="checkbox" checked={billCertData.payment_modes.includes(mode)} onChange={(event) => setBillCertData((previous) => ({ ...previous, payment_modes: event.target.checked ? [...previous.payment_modes, mode] : previous.payment_modes.filter((value) => value !== mode) }))} />
+                              <span>{mode}</span>
+                            </label>
+                          ))}
+                        </div>
+                        <label className="field full-width" style={{ marginTop: 10 }}><span>Payment Mode Details</span><input type="text" placeholder="Cheque / transaction reference, if applicable" value={billCertData.payment_mode_details} onChange={(e) => setBillCertData({ ...billCertData, payment_mode_details: e.target.value })} /></label>
+                      </div>
+                      <div className="form-section-title">STOCK ENTRY & INDENTER DETAILS</div>
+                      <div className="form-grid">
+                        <label className="field"><span>Laboratory / Office</span><input type="text" value={billCertData.lab_office} onChange={(e) => setBillCertData({ ...billCertData, lab_office: e.target.value })} /></label>
+                        <label className="field"><span>Register Type</span><select value={billCertData.register_type} onChange={(e) => setBillCertData({ ...billCertData, register_type: e.target.value })}><option>Recurring Register</option><option>Consumable Register</option><option>Miscellaneous Register</option></select></label>
+                        <label className="field"><span>Register Serial Number</span><input type="text" value={billCertData.serial_number} onChange={(e) => setBillCertData({ ...billCertData, serial_number: e.target.value })} /></label>
+                        <label className="field"><span>Register Page Number</span><input type="text" value={billCertData.page_number} onChange={(e) => setBillCertData({ ...billCertData, page_number: e.target.value })} /></label>
+                        <label className="field"><span>Stock Entry Date</span><input type="text" placeholder="DD/MM/YYYY" value={billCertData.stock_date} onChange={(e) => setBillCertData({ ...billCertData, stock_date: e.target.value })} /></label>
+                        <label className="field"><span>Recording Clerk / Staff</span><input type="text" value={billCertData.clerk_name} onChange={(e) => setBillCertData({ ...billCertData, clerk_name: e.target.value })} /></label>
+                        <label className="field"><span>Indenter Name</span><input type="text" value={billCertData.indenter_name} onChange={(e) => setBillCertData({ ...billCertData, indenter_name: e.target.value })} /></label>
+                        <label className="field"><span>Indenter Designation</span><input type="text" value={billCertData.indenter_designation} onChange={(e) => setBillCertData({ ...billCertData, indenter_designation: e.target.value })} /></label>
+                        <label className="field"><span>Indenter Department</span><input type="text" value={billCertData.indenter_department} onChange={(e) => setBillCertData({ ...billCertData, indenter_department: e.target.value })} /></label>
+                        <label className="field"><span>Recommended Amount (₹)</span><input type="number" min="0" step="0.01" value={billCertData.recommended_amount} onChange={(e) => setBillCertData({ ...billCertData, recommended_amount: e.target.value })} placeholder={`Defaults to ₹${certGrandTotal.toFixed(2)}`} /></label>
                       </div>
                     </>
                   )}
@@ -2746,6 +2860,30 @@ export default function App() {
                             }
                           />
                         </label>
+                        <section className="lead-signature-upload" aria-labelledby="bill-student-head-signature-title">
+                          <div>
+                            <h4 id="bill-student-head-signature-title">Student Head Signature</h4>
+                            <p>Upload a PNG or JPEG image to place in the student head signature area.</p>
+                          </div>
+                          <input ref={billStudentHeadSignatureInputRef} className="visually-hidden" type="file" accept="image/png,image/jpeg,.png,.jpg,.jpeg" onChange={(event) => {
+                            const file = event.target.files?.[0];
+                            event.target.value = "";
+                            if (!file) return;
+                            const fileError = validateLeadSignatureFile(file);
+                            if (fileError) { setBillStudentHeadSignature(clearLeadSignatureState(fileError)); return; }
+                            const reader = new FileReader();
+                            reader.onload = () => setBillStudentHeadSignature(createLeadSignatureState(String(reader.result || ""), file.name, false));
+                            reader.onerror = () => setBillStudentHeadSignature(clearLeadSignatureState("Unable to read this image. Please try another file."));
+                            reader.readAsDataURL(file);
+                          }} />
+                          {hasLeadSignaturePreview(billStudentHeadSignature) ? <div className="lead-signature-preview-wrap"><img className="lead-signature-preview" src={billStudentHeadSignature.data} alt="Uploaded student head signature preview" /><span className="lead-signature-filename">{billStudentHeadSignature.fileName}</span></div> : <div className="lead-signature-empty">No signature image uploaded</div>}
+                          <div className="lead-signature-actions">
+                            <button type="button" className="secondary-btn" onClick={() => billStudentHeadSignatureInputRef.current?.click()}>{billStudentHeadSignature.data ? "Replace Signature" : "Upload Signature"}</button>
+                            {hasLeadSignaturePreview(billStudentHeadSignature) && <button type="button" className="secondary-btn" onClick={() => setBillStudentHeadSignature(clearLeadSignatureState())}>Remove Signature</button>}
+                          </div>
+                          {billStudentHeadSignature.data && <label className="lead-signature-confirm"><input type="checkbox" checked={billStudentHeadSignature.confirmed} onChange={(event) => setBillStudentHeadSignature((previous) => ({ ...previous, confirmed: event.target.checked }))} /> <span>I confirm this is the Student Head's signature and authorize its use in this document.</span></label>}
+                          {billStudentHeadSignature.error && <p className="lead-signature-error" role="alert">{billStudentHeadSignature.error}</p>}
+                        </section>
                         <label className="field">
                           <span>Student Secretary Name</span>
                           <input
@@ -2760,6 +2898,30 @@ export default function App() {
                             }
                           />
                         </label>
+                        <section className="lead-signature-upload" aria-labelledby="bill-student-secretary-signature-title">
+                          <div>
+                            <h4 id="bill-student-secretary-signature-title">Student Secretary Signature</h4>
+                            <p>Upload a PNG or JPEG image to place in the student secretary signature area.</p>
+                          </div>
+                          <input ref={billStudentSecretarySignatureInputRef} className="visually-hidden" type="file" accept="image/png,image/jpeg,.png,.jpg,.jpeg" onChange={(event) => {
+                            const file = event.target.files?.[0];
+                            event.target.value = "";
+                            if (!file) return;
+                            const fileError = validateLeadSignatureFile(file);
+                            if (fileError) { setBillStudentSecretarySignature(clearLeadSignatureState(fileError)); return; }
+                            const reader = new FileReader();
+                            reader.onload = () => setBillStudentSecretarySignature(createLeadSignatureState(String(reader.result || ""), file.name, false));
+                            reader.onerror = () => setBillStudentSecretarySignature(clearLeadSignatureState("Unable to read this image. Please try another file."));
+                            reader.readAsDataURL(file);
+                          }} />
+                          {hasLeadSignaturePreview(billStudentSecretarySignature) ? <div className="lead-signature-preview-wrap"><img className="lead-signature-preview" src={billStudentSecretarySignature.data} alt="Uploaded student secretary signature preview" /><span className="lead-signature-filename">{billStudentSecretarySignature.fileName}</span></div> : <div className="lead-signature-empty">No signature image uploaded</div>}
+                          <div className="lead-signature-actions">
+                            <button type="button" className="secondary-btn" onClick={() => billStudentSecretarySignatureInputRef.current?.click()}>{billStudentSecretarySignature.data ? "Replace Signature" : "Upload Signature"}</button>
+                            {hasLeadSignaturePreview(billStudentSecretarySignature) && <button type="button" className="secondary-btn" onClick={() => setBillStudentSecretarySignature(clearLeadSignatureState())}>Remove Signature</button>}
+                          </div>
+                          {billStudentSecretarySignature.data && <label className="lead-signature-confirm"><input type="checkbox" checked={billStudentSecretarySignature.confirmed} onChange={(event) => setBillStudentSecretarySignature((previous) => ({ ...previous, confirmed: event.target.checked }))} /> <span>I confirm this is the Student Secretary's signature and authorize its use in this document.</span></label>}
+                          {billStudentSecretarySignature.error && <p className="lead-signature-error" role="alert">{billStudentSecretarySignature.error}</p>}
+                        </section>
                         <label className="field">
                           <span>Faculty Chairman Name</span>
                           <input

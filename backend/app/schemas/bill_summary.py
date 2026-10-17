@@ -25,8 +25,12 @@ class BillSummaryRequest(BaseModel):
     # Signatories
     student_head_name: str = Field(default="Ansh Gupta", description="Student Head")
     student_head_title: str = Field(default="Student Head", description="Title")
+    student_head_signature_data: Optional[str] = Field(default=None, max_length=1400000)
+    student_head_signature_confirmed: bool = Field(default=False)
     student_secretary_name: str = Field(default="Arshad Khatib", description="Student Secretary")
     student_secretary_title: str = Field(default="Student Secretary", description="Title")
+    student_secretary_signature_data: Optional[str] = Field(default=None, max_length=1400000)
+    student_secretary_signature_confirmed: bool = Field(default=False)
     faculty_chairman_name: str = Field(default="Dr. Sankita Patel", description="Faculty Chairman")
     faculty_chairman_title: str = Field(default="Faculty Chairman", description="Title")
     club_name: str = Field(default="ACM NIT-Surat", description="Club designation")

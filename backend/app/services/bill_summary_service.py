@@ -1,4 +1,5 @@
 from pathlib import Path
+from PIL import Image as PILImage
 from docx import Document
 from docx.shared import Inches, Pt, RGBColor
 from docx.enum.text import WD_ALIGN_PARAGRAPH
@@ -11,10 +12,46 @@ from reportlab.lib import colors
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.units import inch
 from reportlab.platypus import (
-    SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, PageBreak, KeepTogether
+    SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, PageBreak, KeepTogether, Image as ReportLabImage
 )
 
 from app.schemas.bill_summary import BillSummaryRequest
+from app.services.lead_signature_service import lead_signature_stream
+
+
+def _add_docx_signature(cell, signature_data: str | None):
+    signature_stream = lead_signature_stream(signature_data)
+    if not signature_stream:
+        return
+    with PILImage.open(signature_stream) as signature_image:
+        ratio = signature_image.width / signature_image.height
+        width = Inches(min(1.5, 1.5 if ratio >= 1 else 0.6 * ratio))
+        height = Inches(min(0.6, 1.5 / ratio if ratio >= 1 else 0.6))
+    signature_stream.seek(0)
+    paragraph = cell.add_paragraph()
+    paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    paragraph.paragraph_format.space_after = Pt(2)
+    paragraph.add_run().add_picture(signature_stream, width=width, height=height)
+
+
+def _pdf_signature(signature_data: str | None):
+    signature_stream = lead_signature_stream(signature_data)
+    if not signature_stream:
+        return None
+    with PILImage.open(signature_stream) as signature_image:
+        width_px, height_px = signature_image.size
+    signature_stream.seek(0)
+    scale = min((1.5 * inch) / width_px, (0.6 * inch) / height_px)
+    return ReportLabImage(signature_stream, width=width_px * scale, height=height_px * scale)
+
+
+def _pdf_signatory(role: str, name: str, club: str, signature_data: str | None, style):
+    flowables = [Paragraph(f"<b>{role}</b><br/>{name}<br/>{club}", style)]
+    signature = _pdf_signature(signature_data)
+    if signature:
+        flowables.append(signature)
+    flowables.append(Paragraph("<font color='#94a3b8'>Signature: _________</font>", style))
+    return flowables
 
 def set_cell_background(cell, fill_hex):
     shading_elm = parse_xml(f'<w:shd {nsdecls("w")} w:fill="{fill_hex}"/>')
@@ -196,7 +233,7 @@ class BillSummaryService:
         for ci, w in enumerate(sw):
             sig_table.rows[0].cells[ci].width = w
 
-        def set_sig_col(cell, role, name, club):
+        def set_sig_col(cell, role, name, club, signature_data=None):
             p = cell.paragraphs[0]
             p.alignment = WD_ALIGN_PARAGRAPH.CENTER
             p.paragraph_format.space_after = Pt(2)
@@ -205,12 +242,15 @@ class BillSummaryService:
             r_role.font.size = Pt(9)
             p.add_run(f"{name}\n").font.size = Pt(9)
             p.add_run(f"{club}\n\n").font.size = Pt(8.5)
-            r_line = p.add_run("Signature: ______________")
+            _add_docx_signature(cell, signature_data)
+            p_line = cell.add_paragraph()
+            p_line.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            r_line = p_line.add_run("Signature: ______________")
             r_line.font.size = Pt(8)
             r_line.font.color.rgb = RGBColor(148, 163, 184)
 
-        set_sig_col(sig_table.rows[0].cells[0], data.student_head_title, data.student_head_name, data.club_name)
-        set_sig_col(sig_table.rows[0].cells[1], data.student_secretary_title, data.student_secretary_name, data.club_name)
+        set_sig_col(sig_table.rows[0].cells[0], data.student_head_title, data.student_head_name, data.club_name, data.student_head_signature_data)
+        set_sig_col(sig_table.rows[0].cells[1], data.student_secretary_title, data.student_secretary_name, data.club_name, data.student_secretary_signature_data)
         set_sig_col(sig_table.rows[0].cells[2], data.faculty_chairman_title, data.faculty_chairman_name, data.club_name)
 
         # PAGE 2: Other Bank Account Details
@@ -385,8 +425,8 @@ class BillSummaryService:
         # Signatures 3 columns
         sig_data = [
             [
-                Paragraph(f"<b>{data.student_head_title}</b><br/>{data.student_head_name}<br/>{data.club_name}<br/><br/><font color='#94a3b8'>Signature: _________</font>", body_center),
-                Paragraph(f"<b>{data.student_secretary_title}</b><br/>{data.student_secretary_name}<br/>{data.club_name}<br/><br/><font color='#94a3b8'>Signature: _________</font>", body_center),
+                _pdf_signatory(data.student_head_title, data.student_head_name, data.club_name, data.student_head_signature_data, body_center),
+                _pdf_signatory(data.student_secretary_title, data.student_secretary_name, data.club_name, data.student_secretary_signature_data, body_center),
                 Paragraph(f"<b>{data.faculty_chairman_title}</b><br/>{data.faculty_chairman_name}<br/>{data.club_name}<br/><br/><font color='#94a3b8'>Signature: _________</font>", body_center)
             ]
         ]
