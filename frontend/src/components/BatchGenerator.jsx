@@ -59,11 +59,91 @@ const defaultDemoJobs = [
         }
       ]
     }
+  },
+  {
+    job_id: "batch-prize-1",
+    document_type: "prize_money_receipt",
+    payload: {
+      date: "15/10/2026",
+      competition_name: "ACM Algocode Hackathon",
+      event_dates: "24/10/2026 - 25/10/2026",
+      student_name: "Rahul Sharma",
+      roll_no: "U23CS045",
+      phone_no: "9876543210",
+      rank: "1st",
+      prize_money: 5000,
+      bank_account_no: "3928101004567",
+      bank_name: "State Bank of India",
+      ifsc_code: "SBIN0001234"
+    }
   }
 ];
 
+const DOC_TYPE_LABELS = {
+  exec_meet: "Executive Meet / Permission Document",
+  prize_money_receipt: "Prize Money Receipt",
+  bill_certificate: "Bill Certificate",
+  bill_summary: "Bill Summary"
+};
+
+const DEFAULT_JOB_PAYLOADS = {
+  exec_meet: {
+    date: "15/10/2026",
+    event_name: "New Meeting Event",
+    venue: "Seminar Hall 402, SVNIT",
+    event_date: "25/10/2026",
+    time_from: "10:00 AM",
+    time_to: "01:00 PM",
+    brief_description: "Event discussion.",
+    objective: "Team alignment.",
+    participants: "50 Attendees",
+    mode: "Offline",
+    organizers: "ACM SVNIT Chapter"
+  },
+  prize_money_receipt: {
+    date: "15/10/2026",
+    competition_name: "ACM Algocode Hackathon",
+    event_dates: "24/10/2026 - 25/10/2026",
+    student_name: "Rahul Sharma",
+    roll_no: "U23CS045",
+    phone_no: "9876543210",
+    rank: "1st",
+    prize_money: 5000,
+    bank_account_no: "3928101004567",
+    bank_name: "State Bank of India",
+    ifsc_code: "SBIN0001234"
+  },
+  bill_certificate: {
+    chapter_name: "ACM",
+    code_no: "6/52",
+    date: "12/10/2026",
+    supplier_name: "Royal Printers & Stationers",
+    items: [
+      { name: "Event Badges & Lanyards", quantity: 90, unit_cost: 15.0 },
+      { name: "Workshop Certificates", quantity: 90, unit_cost: 8.0 }
+    ],
+    taxes_or_other_charges: 100.0,
+    invoice_no_and_date: "INV-2026/77 dated 11/10/2026"
+  },
+  bill_summary: {
+    date: "15/10/2026",
+    title: "BILL SUMMARY",
+    subtitle: "Workshop Logistics & Reimbursements",
+    rows: [
+      {
+        name: "Project Lead",
+        account_details: "Reimbursement for cloud server hosting",
+        to_be_paid_to: "Lead Developer",
+        prize_money: 0,
+        other_amount: 1500.0
+      }
+    ]
+  }
+};
+
 export default function BatchGenerator() {
   const [jobs, setJobs] = useState(defaultDemoJobs);
+  const [addType, setAddType] = useState("exec_meet");
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState(null);
   const [error, setError] = useState("");
@@ -74,25 +154,19 @@ export default function BatchGenerator() {
     setError("");
   }
 
-  function handleAddEmptyJob() {
+  function handleAddJob(typeToAdd = addType) {
     if (jobs.length >= 10) {
       setError("Maximum 10 batch jobs allowed in single run.");
       return;
     }
     const newId = `job-${Date.now().toString().slice(-4)}`;
+    const payload = DEFAULT_JOB_PAYLOADS[typeToAdd] || DEFAULT_JOB_PAYLOADS.exec_meet;
     setJobs([
       ...jobs,
       {
         job_id: newId,
-        document_type: "exec_meet",
-        payload: {
-          date: "15/10/2026",
-          event_name: "New Meeting Event",
-          venue: "Seminar Hall 402",
-          event_date: "25/10/2026",
-          brief_description: "Event discussion.",
-          objective: "Team alignment."
-        }
+        document_type: typeToAdd,
+        payload: { ...payload }
       }
     ]);
   }
@@ -130,19 +204,30 @@ export default function BatchGenerator() {
             Queue and generate multiple official documents concurrently with error isolation and ZIP download.
           </p>
         </div>
-        <div className="page-panel-actions">
+        <div className="page-panel-actions" style={{ display: "flex", gap: "8px", alignItems: "center" }}>
           <button
             type="button"
             className="secondary-btn"
             onClick={handleLoadDemoBatch}
             style={{ padding: "6px 12px", fontSize: "0.85rem" }}
           >
-            📋 Load Demo Batch (3 Jobs)
+            📋 Load Demo Batch ({defaultDemoJobs.length} Documents)
           </button>
+          <select
+            value={addType}
+            onChange={(e) => setAddType(e.target.value)}
+            style={{ padding: "6px 10px", fontSize: "0.85rem", borderRadius: "6px" }}
+            aria-label="Document type to add"
+          >
+            <option value="exec_meet">Executive Meet</option>
+            <option value="prize_money_receipt">Prize Money Receipt</option>
+            <option value="bill_certificate">Bill Certificate</option>
+            <option value="bill_summary">Bill Summary</option>
+          </select>
           <button
             type="button"
             className="secondary-btn"
-            onClick={handleAddEmptyJob}
+            onClick={() => handleAddJob(addType)}
             style={{ padding: "6px 12px", fontSize: "0.85rem" }}
           >
             ➕ Add Job
@@ -162,10 +247,10 @@ export default function BatchGenerator() {
           <div key={job.job_id || idx} className="batch-job-row">
             <div className="batch-job-info">
               <span style={{ fontWeight: "700", color: "#1e293b", fontSize: "0.95rem" }}>
-                Job {idx + 1}: {job.document_type === "exec_meet" ? "Executive Meet" : job.document_type === "bill_certificate" ? "Bill Certificate" : "Bill Summary"}
+                Job {idx + 1}: {DOC_TYPE_LABELS[job.document_type] || job.document_type}
               </span>
               <span className="batch-job-detail">
-                [{job.job_id}] — {job.payload.event_name || job.payload.supplier_name || job.payload.title || "Custom Payload"}
+                [{job.job_id}] — {job.payload.event_name || job.payload.competition_name || job.payload.supplier_name || job.payload.title || "Custom Payload"}
               </span>
             </div>
             <button

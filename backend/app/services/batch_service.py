@@ -13,9 +13,11 @@ from app.utils import supabase_storage
 from app.schemas.executive_meet import ExecutiveMeetRequest
 from app.schemas.bill_certificate import BillCertificateRequest
 from app.schemas.bill_summary import BillSummaryRequest
+from app.schemas.prize_money_receipt import PrizeMoneyReceiptRequest
 from app.services.executive_meet_service import ExecutiveMeetService
 from app.services.bill_certificate_service import BillCertificateService
 from app.services.bill_summary_service import BillSummaryService
+from app.services.prize_money_receipt_service import PrizeMoneyReceiptService
 from app.services.document_repository import DocumentRepository
 
 BATCH_DIR = Path(__file__).resolve().parent.parent.parent / "generated_docs" / "batches"
@@ -116,6 +118,27 @@ class BatchService:
                         document_type="bill_summary",
                         title=validated.title,
                         data=validated.model_dump(),
+                        docx_path=str(docx_p),
+                        pdf_path=str(pdf_p),
+                        change_summary=f"Batch generated ({job_id})"
+                    )
+                elif doc_type == "prize_money_receipt":
+                    validated = PrizeMoneyReceiptRequest(**payload)
+                    safe_date = sanitize_filename(validated.date.replace("/", "-"))
+                    docx_fn = f"{job_id}_Prize_Money_Receipt_{safe_date}.docx"
+                    pdf_fn = f"{job_id}_Prize_Money_Receipt_{safe_date}.pdf"
+
+                    docx_p = batch_folder / docx_fn
+                    pdf_p = batch_folder / pdf_fn
+
+                    PrizeMoneyReceiptService.generate_docx(validated, docx_p)
+                    PrizeMoneyReceiptService.generate_pdf(validated, pdf_p)
+
+                    DocumentRepository.create_document(
+                        user_id=user_id,
+                        document_type="prize_money_receipt",
+                        title=f"Prize Receipt - {validated.student_name}",
+                        data=validated.model_dump(mode="json"),
                         docx_path=str(docx_p),
                         pdf_path=str(pdf_p),
                         change_summary=f"Batch generated ({job_id})"

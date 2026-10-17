@@ -145,8 +145,8 @@ def test_executive_meet_generation(tmp_path):
         PdfReader = None
     if PdfReader:
         certificate_text = "\n".join(page.extract_text() or "" for page in PdfReader(BytesIO(dl_pdf.content)).pages)
-        assert "Stationery & Tech Supplies Ltd." in certificate_text
-        assert "Item Alpha" in certificate_text and "Item Beta" in certificate_text
+        assert "ACM Executives Meet" in certificate_text
+        assert "Seminar Hall 402" in certificate_text
     assert dl_pdf.headers["content-type"] == "application/pdf"
     assert len(dl_pdf.content) > 1000
 
@@ -310,8 +310,8 @@ def test_bill_certificate_calculation_and_generation():
     except ImportError:
         PdfReader = None
     if PdfReader:
-        summary_text = "\n".join(page.extract_text() or "" for page in PdfReader(BytesIO(dl_pdf.content)).pages)
-        assert "Team Codex" in summary_text and "Team Algo" in summary_text
+        cert_text = "\n".join(page.extract_text() or "" for page in PdfReader(BytesIO(dl_pdf.content)).pages)
+        assert "Stationery & Tech Supplies Ltd." in cert_text and "Item Alpha" in cert_text
 
 def test_bill_certificate_invalid_items():
     payload = {

@@ -69,24 +69,163 @@ class TemplateEditorService:
             "student_secretary_name": "Student Secretary",
             "faculty_chairman_name": "Faculty Chairman",
             "club_name": "ACM NIT-Surat"
+        },
+        "prize_money_receipt": {
+            "serial_number": "ACM/PR/2026/01",
+            "date": "15/10/2026",
+            "amount_rupees": 5000.00,
+            "competition_name": "Web3 & AI Hackathon 2026",
+            "position": "1st Prize Winner",
+            "organizing_body": "ACM SVNIT Student Chapter",
+            "event_date": "12/10/2026",
+            "venue": "Seminar Hall 402, SVNIT",
+            "affiliating_institute": "Sardar Vallabhbhai National Institute of Technology, Surat",
+            "name_as_per_bank": "Student Winner",
+            "bank_name": "State Bank of India",
+            "branch": "SVNIT Campus Branch",
+            "account_number": "38927491024",
+            "ifsc_code": "SBIN0003320",
+            "pan_number": "ABCDE1234F",
+            "student_name": "Student Winner",
+            "roll_number": "U24CS001",
+            "course_semester": "B.Tech CSE - 5th Semester",
+            "mobile_number": "9876543210",
+            "chairman_name": "Dr. Sankita J. Patel"
         }
     }
 
-    @staticmethod
-    def get_template_config(template_id: str) -> Optional[Dict[str, Any]]:
+    DEFAULT_CONFIGS = {
+        "exec_meet": {
+            "id": "tmpl-exec-meet",
+            "template_id": "exec_meet",
+            "display_name": "Executive Meet Request",
+            "section_ordering": ["header", "event_details", "schedule", "conduct_mode", "description", "signatories"],
+            "labels": {
+                "event_name": "Event Title",
+                "event_date": "Date of Event",
+                "venue": "Hall / Venue",
+                "mode": "Mode of Conduct",
+                "lead_name": "Student Lead / Chairperson"
+            },
+            "branding": {
+                "org_name": "ACM Student Chapter",
+                "institute": "Sardar Vallabhbhai National Institute of Technology, Surat",
+                "department": "Department of Computer Science & Engineering"
+            },
+            "optional_sections": ["online_meeting_details", "agenda_items", "technical_assistance"]
+        },
+        "prize_money_receipt": {
+            "id": "tmpl-prize-receipt",
+            "template_id": "prize_money_receipt",
+            "display_name": "Prize Money Receipt",
+            "section_ordering": ["header", "event_info", "payment_acknowledgement", "bank_account_details", "student_details", "signatures"],
+            "labels": {
+                "serial_number": "Serial Number",
+                "competition_name": "Competition / Hackathon Title",
+                "position": "Prize Position Awarded",
+                "amount_rupees": "Prize Amount (INR)",
+                "student_name": "Student Beneficiary Name",
+                "roll_number": "Roll / Admission Number",
+                "bank_name": "Bank Name",
+                "account_number": "Account Number",
+                "ifsc_code": "Bank IFSC Code"
+            },
+            "branding": {
+                "org_name": "ACM SVNIT Chapter",
+                "institute": "Sardar Vallabhbhai National Institute of Technology, Surat",
+                "department": "Department of Computer Science & Engineering",
+                "receipt_title": "OFFICIAL PRIZE MONEY RECEIPT"
+            },
+            "optional_sections": ["pan_verification", "course_semester_verification"]
+        },
+        "bill_certificate": {
+            "id": "tmpl-bill-cert",
+            "template_id": "bill_certificate",
+            "display_name": "Bill Certificate (Recurring)",
+            "section_ordering": ["header", "approval_reference", "supplier_details", "itemized_table", "banking_details", "stock_register", "signatories"],
+            "labels": {
+                "chapter_name": "Chapter Name",
+                "supplier_name": "Vendor / Supplier Name",
+                "invoice_no_and_date": "Invoice Details",
+                "account_number": "Bank Account Number"
+            },
+            "branding": {
+                "form_code": "SVNIT Form BC-R",
+                "title": "CERTIFICATE FOR RECURRING EXPENDITURE",
+                "institute": "Sardar Vallabhbhai National Institute of Technology, Surat"
+            },
+            "optional_sections": ["tax_breakdown", "advance_drawn_adjustment"]
+        },
+        "bill_summary": {
+            "id": "tmpl-bill-summary",
+            "template_id": "bill_summary",
+            "display_name": "Bill Summary",
+            "section_ordering": ["header", "title", "reimbursement_table", "grand_totals", "signatories"],
+            "labels": {
+                "title": "Document Title",
+                "subtitle": "Activity Context",
+                "date": "Submission Date"
+            },
+            "branding": {
+                "sheet_title": "ACM NIT-Surat Bill Summary",
+                "footer": "Confidential - For Official Financial Processing",
+                "institute": "Sardar Vallabhbhai National Institute of Technology, Surat"
+            },
+            "optional_sections": ["variable_expense_breakdown", "prize_vs_operational"]
+        }
+    }
+
+    @classmethod
+    def get_template_config(cls, template_id: str) -> Optional[Dict[str, Any]]:
         with get_db() as conn:
             row = conn.execute("SELECT * FROM template_configs WHERE template_id = ?", (template_id,)).fetchone()
-            if not row:
-                return None
-            cfg = dict(row)
-            cfg["section_ordering"] = json.loads(cfg["section_ordering_json"])
-            cfg["labels"] = json.loads(cfg["labels_json"])
-            cfg["branding"] = json.loads(cfg["branding_json"])
-            cfg["optional_sections"] = json.loads(cfg["optional_sections_json"])
-            return cfg
+            if row:
+                cfg = dict(row)
+                cfg["section_ordering"] = json.loads(cfg["section_ordering_json"])
+                cfg["labels"] = json.loads(cfg["labels_json"])
+                cfg["branding"] = json.loads(cfg["branding_json"])
+                cfg["optional_sections"] = json.loads(cfg["optional_sections_json"])
+                return cfg
 
-    @staticmethod
-    def list_template_configs() -> List[Dict[str, Any]]:
+            # Fallback to DEFAULT_CONFIGS and auto-insert into DB
+            default = cls.DEFAULT_CONFIGS.get(template_id)
+            if default:
+                try:
+                    conn.execute(
+                        """
+                        INSERT INTO template_configs (id, template_id, display_name, section_ordering_json, labels_json, branding_json, optional_sections_json)
+                        VALUES (?, ?, ?, ?, ?, ?, ?)
+                        ON CONFLICT (template_id) DO NOTHING
+                        """,
+                        (
+                            default["id"],
+                            template_id,
+                            default["display_name"],
+                            json.dumps(default["section_ordering"]),
+                            json.dumps(default["labels"]),
+                            json.dumps(default["branding"]),
+                            json.dumps(default["optional_sections"]),
+                        )
+                    )
+                except Exception:
+                    pass
+                return {
+                    "id": default["id"],
+                    "template_id": template_id,
+                    "display_name": default["display_name"],
+                    "section_ordering": list(default["section_ordering"]),
+                    "labels": dict(default["labels"]),
+                    "branding": dict(default["branding"]),
+                    "optional_sections": list(default["optional_sections"]),
+                }
+            return None
+
+    @classmethod
+    def list_template_configs(cls) -> List[Dict[str, Any]]:
+        # Ensure all default template configs exist
+        for tid in cls.DEFAULT_CONFIGS:
+            cls.get_template_config(tid)
+
         with get_db() as conn:
             rows = conn.execute("SELECT * FROM template_configs ORDER BY template_id").fetchall()
             configs = []

@@ -3,6 +3,7 @@ import { fetchTemplateConfigs, fetchTemplatePreview, updateTemplateConfig } from
 
 const TEMPLATE_OPTIONS = [
   { id: "exec_meet", label: "Executive Meet Request" },
+  { id: "prize_money_receipt", label: "Prize Money Receipt" },
   { id: "bill_certificate", label: "Bill Certificate (Recurring)" },
   { id: "bill_summary", label: "Bill Summary" },
 ];

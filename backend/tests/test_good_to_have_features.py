@@ -156,13 +156,39 @@ def test_batch_generate_multiple_jobs_and_zip():
                 "supplier_name": "Batch Supplier",
                 "items": [{"name": "Pencils", "quantity": 10, "unit_cost": 5.0}]
             }
+        },
+        {
+            "job_id": "job-3",
+            "document_type": "prize_money_receipt",
+            "payload": {
+                "serial_number": "ACM/PR/2026/01",
+                "date": "10/10/2026",
+                "amount_rupees": 2500.00,
+                "competition_name": "Hackathon 2026",
+                "position": "1st Prize",
+                "organizing_body": "ACM SVNIT Student Chapter",
+                "event_date": "10/10/2026",
+                "venue": "Seminar Hall 402, SVNIT",
+                "affiliating_institute": "SVNIT Surat",
+                "name_as_per_bank": "Alice Winner",
+                "bank_name": "State Bank of India",
+                "branch": "SVNIT Campus",
+                "account_number": "123456789012",
+                "ifsc_code": "SBIN0001234",
+                "pan_number": "ABCDE1234F",
+                "student_name": "Alice Winner",
+                "roll_number": "U23CS999",
+                "course_semester": "B.Tech CSE Sem 5",
+                "mobile_number": "9876543210",
+                "chairman_name": "Dr. Chairman"
+            }
         }
     ]
     res = client.post("/api/documents/batch/generate", json={"jobs": jobs})
     assert res.status_code == 200
     data = res.json()
-    assert data["total_jobs"] == 2
-    assert data["successful_count"] == 2
+    assert data["total_jobs"] == 3
+    assert data["successful_count"] == 3
     assert data["failed_count"] == 0
     assert data["zip_download_url"] is not None
 
@@ -446,7 +472,7 @@ def test_reusable_clauses_listing_and_interpolation():
 def test_template_preview_and_config():
     res = client.get("/api/documents/templates-config/list")
     assert res.status_code == 200
-    assert len(res.json()["configs"]) == 3
+    assert len(res.json()["configs"]) == 4
 
     prev_res = client.get("/api/documents/templates-config/exec_meet/preview")
     assert prev_res.status_code == 200
@@ -454,6 +480,12 @@ def test_template_preview_and_config():
     assert pdata["is_sample_preview"] is True
     assert "sample_data" in pdata
     assert "DO NOT USE AS OFFICIAL DOCUMENT" in pdata["preview_notice"]
+
+    prize_prev = client.get("/api/documents/templates-config/prize_money_receipt/preview")
+    assert prize_prev.status_code == 200
+    prize_data = prize_prev.json()
+    assert prize_data["is_sample_preview"] is True
+    assert "competition_name" in prize_data["sample_data"]
 
 # ============================================================
 # FEATURE 9: ROLE-BASED ACCESS CONTROL (RBAC)
