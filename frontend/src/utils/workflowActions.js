@@ -6,7 +6,7 @@ export function getWorkflowActions(document, actorRole) {
     return [{ value: "ready_for_review", label: "Submit to Reviewer" }];
   }
   if (role === "reviewer" && stage === "reviewer" && status === "ready_for_review") {
-    return [{ value: "in_review", label: "Start Review" }, { value: "changes_requested", label: "Request Changes" }];
+    return [{ value: "review_approved", label: "Approve and Send to Approver" }, { value: "changes_requested", label: "Request Changes" }];
   }
   if (role === "reviewer" && stage === "reviewer" && status === "in_review") {
     return [{ value: "review_approved", label: "Approve Review" }, { value: "changes_requested", label: "Request Changes" }];

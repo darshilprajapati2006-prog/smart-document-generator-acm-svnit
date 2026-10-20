@@ -258,7 +258,6 @@ def test_authenticated_current_version_pdf_and_docx_downloads_are_valid_and_acce
     assert premature_approval.status_code == 409
     for target_status, headers in (
         ("ready_for_review", author_headers),
-        ("in_review", reviewer_headers),
         ("review_approved", reviewer_headers),
         ("approver_approved", approver_headers),
         ("template_approved", {"Authorization": "Bearer test-firebase:usr-tmpladmin-01:tmpladmin@svnit.acm.org:1"}),

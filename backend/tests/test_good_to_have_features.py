@@ -317,13 +317,6 @@ def test_approval_workflow_lifecycle_and_permissions():
     assert r1.status_code == 200
     assert r1.json()["to_status"] == "ready_for_review"
 
-    # Reviewer moves Ready for Review -> In Review
-    r2 = client.post(f"/api/documents/{repo_id}/workflow/transition", json={
-        "target_status": "in_review",
-        "comment": "Under review by Hall in-charge"
-    }, headers=reviewer_headers)
-    assert r2.status_code == 200
-
     # A downstream role cannot skip the reviewer stage.
     r_skip = client.post(f"/api/documents/{repo_id}/workflow/transition", json={
         "target_status": "approver_approved",
@@ -338,7 +331,7 @@ def test_approval_workflow_lifecycle_and_permissions():
     }, headers=viewer_headers)
     assert r_unauth.status_code == 403
 
-    # Reviewer approval hands off to Approver, not directly to final status.
+    # One reviewer decision hands off directly to Approver.
     r_review = client.post(f"/api/documents/{repo_id}/workflow/transition", json={
         "target_status": "review_approved",
         "comment": "Review complete",
@@ -384,12 +377,12 @@ def test_approval_workflow_lifecycle_and_permissions():
     # Check workflow audit history
     hist = client.get(f"/api/documents/{repo_id}/workflow/history")
     assert hist.status_code == 200
-    assert len(hist.json()["history"]) == 6
+    assert len(hist.json()["history"]) == 5
     assert [event["actor_role"] for event in hist.json()["history"]] == [
-        "author", "reviewer", "reviewer", "approver", "template_admin", "admin"
+        "author", "reviewer", "approver", "template_admin", "admin"
     ]
     assert [(event["from_stage"], event["to_stage"]) for event in hist.json()["history"]] == [
-        ("author", "reviewer"), ("reviewer", "reviewer"), ("reviewer", "approver"),
+        ("author", "reviewer"), ("reviewer", "approver"),
         ("approver", "template_admin"), ("template_admin", "admin"), ("admin", "completed"),
     ]
 
@@ -413,7 +406,7 @@ def test_approval_workflow_lifecycle_and_permissions():
     versions = client.get(f"/api/documents/{repo_id}/versions", headers=author_headers)
     assert [version["version_num"] for version in versions.json()["versions"]] == [2, 1]
     history_after_revision = client.get(f"/api/documents/{repo_id}/workflow/history", headers=author_headers)
-    assert len(history_after_revision.json()["history"]) == 6
+    assert len(history_after_revision.json()["history"]) == 5
 
 # ============================================================
 # FEATURE 6: REUSABLE CLAUSES AND SECTIONS

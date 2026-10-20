@@ -15,7 +15,9 @@ class WorkflowService:
     ACTIONS = {
         ("author", "draft", "ready_for_review"): ("reviewer", "ready_for_review"),
         ("author", "changes_requested", "ready_for_review"): ("reviewer", "ready_for_review"),
-        ("reviewer", "ready_for_review", "in_review"): ("reviewer", "in_review"),
+        # A reviewer decision is a single handoff to the approver. There is no
+        # separate "start review" click that leaves ownership at the reviewer.
+        ("reviewer", "ready_for_review", "review_approved"): ("approver", "in_review"),
         ("reviewer", "in_review", "review_approved"): ("approver", "in_review"),
         ("reviewer", "ready_for_review", "changes_requested"): ("author", "changes_requested"),
         ("reviewer", "in_review", "changes_requested"): ("author", "changes_requested"),

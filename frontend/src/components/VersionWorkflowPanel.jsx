@@ -43,6 +43,7 @@ export default function VersionWorkflowPanel({ documentId, role }) {
   const [versions, setVersions] = useState([]);
   const [workflowLogs, setWorkflowLogs] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [transitionSubmitting, setTransitionSubmitting] = useState(false);
   const [downloadingFormat, setDownloadingFormat] = useState("");
   const [pdfPreviewUrl, setPdfPreviewUrl] = useState("");
   const [actionFeedback, setActionFeedback] = useState({ type: "", message: "" });
@@ -144,17 +145,27 @@ export default function VersionWorkflowPanel({ documentId, role }) {
 
   async function handleTransitionSubmit(e) {
     e.preventDefault();
+    if (transitionSubmitting) return;
+    setTransitionSubmitting(true);
     try {
       const res = await transitionWorkflow(selectedDocId, targetStatus, comment);
       setActionFeedback({
         type: "success",
-        message: `Workflow state updated to '${res.to_status}' successfully.`
+        message: res.to_stage === "completed"
+          ? "Workflow completed successfully."
+          : `Decision submitted. Sent to ${WORKFLOW_ROLE_LABELS[res.to_stage] || res.to_stage}.`
       });
       setComment("");
-      loadDocs();
-      loadDocDetails(selectedDocId);
+      // Reflect the committed transition immediately, then refresh canonical
+      // document and audit data so the next role sees the new stage at once.
+      setDocuments((previous) => previous.map((doc) => doc.id === selectedDocId
+        ? { ...doc, status: res.to_status, workflow_stage: res.to_stage }
+        : doc));
+      await Promise.all([loadDocs(), loadDocDetails(selectedDocId)]);
     } catch (err) {
       setActionFeedback({ type: "error", message: err.message });
+    } finally {
+      setTransitionSubmitting(false);
     }
   }
 
@@ -486,8 +497,8 @@ export default function VersionWorkflowPanel({ documentId, role }) {
                       aria-label={["changes_requested", "rejected"].includes(targetStatus) ? "Required review comments" : "Optional review comments"}
                       style={{ flex: 1, minWidth: "220px", padding: "8px 12px", borderRadius: "6px", border: "1px solid #cbd5e1", fontSize: "0.88rem" }}
                     />
-                    <button type="submit" className="primary-btn" disabled={loading} style={{ padding: "8px 16px", fontSize: "0.88rem" }}>
-                      Submit decision
+                    <button type="submit" className="primary-btn" disabled={loading || transitionSubmitting} style={{ padding: "8px 16px", fontSize: "0.88rem" }}>
+                      {transitionSubmitting ? "Submitting…" : "Submit decision"}
                     </button>
                   </form> : <p style={{ color: "#64748b", margin: "4px 0 12px" }}>
                     {activeDoc.status === "approved"
