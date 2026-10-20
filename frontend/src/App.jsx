@@ -848,6 +848,49 @@ export default function App() {
           fieldCount += res.recipients.length;
         }
         setBillSummaryData((prev) => ({ ...prev, ...applied }));
+      } else if (activeTargetType === "prize_money_receipt") {
+        const fields = res.extracted_fields || {};
+        const aliases = {
+          serial_number: ["serial_number", "reference_number", "ref_no"],
+          date: ["date", "receipt_date"],
+          amount_rupees: ["amount_rupees", "prize_amount", "amount"],
+          competition_name: ["competition_name", "event_name", "event_title"],
+          position: ["position", "position_secured", "rank"],
+          organizing_body: ["organizing_body", "organizer"],
+          event_date: ["event_date"], venue: ["venue", "event_venue"],
+          affiliating_institute: ["affiliating_institute", "institute"],
+          name_as_per_bank: ["name_as_per_bank", "account_holder_name"],
+          bank_name: ["bank_name"], branch: ["branch", "bank_branch"],
+          account_number: ["account_number", "account_no"], ifsc_code: ["ifsc_code"],
+          pan_number: ["pan_number", "pan"], student_name: ["student_name", "name"],
+          roll_number: ["roll_number", "student_id"],
+          course_semester: ["course_semester", "course", "semester"],
+          mobile_number: ["mobile_number", "phone"], chairman_name: ["chairman_name", "chairman"],
+        };
+        const applied = {};
+        for (const [key, names] of Object.entries(aliases)) {
+          const value = names.map((name) => fields[name]).find((item) => item !== undefined && item !== null && String(item).trim());
+          if (value !== undefined) {
+            applied[key] = String(value).trim();
+            fieldCount++;
+          }
+        }
+        setPrizeMoneyData((prev) => ({ ...prev, ...applied }));
+      } else if (activeTargetType === "submitted") {
+        const fields = res.extracted_fields || {};
+        const directKeys = ["ref_no", "date", "submitted_to", "subject", "chapter_name", "code_no", "event_schedule", "event_venue", "event_title", "category", "brief_description", "objectives", "target_audience", "expected_participants", "judges", "student_head_name", "student_head_roll", "student_head_branch", "student_head_mobile", "student_secretary_name", "student_secretary_roll", "student_secretary_branch", "student_secretary_mobile", "faculty_co_chairman_name", "faculty_co_chairman_designation", "faculty_co_chairman_dept", "faculty_co_chairman_mobile", "faculty_chairman_name", "faculty_chairman_designation", "faculty_chairman_dept", "faculty_chairman_mobile"];
+        const applied = {};
+        directKeys.forEach((key) => {
+          if (fields[key] !== undefined && fields[key] !== null && String(fields[key]).trim()) {
+            applied[key] = String(fields[key]).trim();
+            fieldCount++;
+          }
+        });
+        if (Array.isArray(fields.financial_items)) {
+          applied.financial_items = fields.financial_items.filter((item) => item && item.item && Number(item.amount) >= 0).map((item) => ({ item: String(item.item), amount: Number(item.amount) }));
+          fieldCount += applied.financial_items.length;
+        }
+        setSubmittedData((prev) => ({ ...prev, ...applied }));
       }
 
       if (fieldCount > 0) {
@@ -1923,7 +1966,7 @@ export default function App() {
             )}
 
             {/* NATURAL LANGUAGE QUICK-FILL WORKFLOW */}
-            {selectedType !== "prize_money_receipt" && <div className="nlp-banner">
+            <div className="nlp-banner">
               <div className="nlp-header">
                 <div>
                   <strong>✨ Natural Language Quick-Fill Assistant</strong>
@@ -1950,6 +1993,10 @@ export default function App() {
                       placeholder={
                         selectedType === "exec_meet"
                           ? "e.g., Organize an ACM AI and Machine Learning workshop on 20 November 2026 from 10 AM to 1 PM at Seminar Hall 402, SVNIT Surat, for 120 students. The workshop will be organized by the ACM Core Team."
+                          : selectedType === "prize_money_receipt"
+                          ? "e.g., A student named Aisha Patel (I24CS042), B.Tech CSE Semester 5, won first place and ₹25,000 at the ACM Innovation Challenge organized by XYZ University on 12 September 2026 at SVNIT Surat. Her bank is SBI, Surat branch; include the account and PAN details if provided."
+                          : selectedType === "submitted"
+                          ? "e.g., Request permission for an ACM workshop on 20 November 2026 at Seminar Hall 402 for 120 students, with ₹5,000 for refreshments and ₹2,000 for banners."
                           : selectedType === "bill_certificate"
                           ? "e.g., Purchase 25 notebooks at Rs 80 each and 10 pen sets at Rs 120 each from ABC Stationery."
                           : "e.g., Prepare a reimbursement summary for three students: Rahul Rs 1500 for travel, Priya Rs 800 for printing, and Amit Rs 1200 for event supplies."
@@ -2007,7 +2054,7 @@ export default function App() {
                   )}
                 </div>
               )}
-            </div>}
+            </div>
 
             {/* STEP 2: DYNAMIC DOCUMENT INFORMATION FORM */}
             <section className="section form-section">

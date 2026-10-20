@@ -693,7 +693,7 @@ def extract_fields_from_nlp(request: NLPExtractRequest, current_user: Dict[str, 
     lower_text = text.lower()
 
     # Determine recommended document type
-    if request.document_type in ["exec_meet", "bill_certificate", "bill_summary"]:
+    if request.document_type in ["exec_meet", "bill_certificate", "bill_summary", "prize_money_receipt", "submitted"]:
         recommended_type = request.document_type
     elif any(k in lower_text for k in ["bill certificate", "purchas", "notebooks", "stationery", "pen sets", "unit price", "supplier is"]):
         recommended_type = "bill_certificate"
@@ -839,12 +839,18 @@ def extract_fields_from_nlp(request: NLPExtractRequest, current_user: Dict[str, 
                 "recipient_count": len(recipients)
             }
 
+    # Prize receipts and submitted proposals have many identity, banking, and
+    # signatory fields that must never be guessed. Use the LLM only to extract
+    # explicitly supplied values; the frontend maps recognized fields.
+    elif recommended_type in {"prize_money_receipt", "submitted"}:
+        pass
+
     tmpl = template_registry.get(recommended_type)
     missing_fields = tmpl.get_missing_required_fields(extracted) if tmpl else []
 
     extractor_used = "deterministic"
     # Optional LLM fallback when deterministic extraction yielded minimal data
-    if is_llm_configured() and len(extracted) < 2:
+    if is_llm_configured() and (len(extracted) < 2 or recommended_type in {"prize_money_receipt", "submitted"}):
         try:
             llm_result = extract_with_llm(text, recommended_type)
             if llm_result and isinstance(llm_result, dict):

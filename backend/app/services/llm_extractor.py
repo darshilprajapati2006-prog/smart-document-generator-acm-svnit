@@ -15,7 +15,7 @@ RULES:
 3. If a field is not explicitly mentioned in the user prompt, omit it entirely from the JSON.
 4. Normalize dates to DD/MM/YYYY or DD Month YYYY as given in text.
 5. Normalize times to HH:MM AM/PM.
-6. Support document types: "exec_meet", "bill_certificate", "bill_summary".
+6. Support document types: "exec_meet", "bill_certificate", "bill_summary", "prize_money_receipt", and "submitted".
 7. For "exec_meet", supported keys are:
    - event_name
    - event_date
@@ -28,7 +28,10 @@ RULES:
    - brief_description (summary of session coverage)
    - lead_name (coordinator / student head)
    - objective
-8. Output MUST be valid JSON only, without markdown fences or additional commentary.
+8. For "prize_money_receipt", supported keys are: serial_number, date, amount_rupees, competition_name, position, organizing_body, event_date, venue, affiliating_institute, name_as_per_bank, bank_name, branch, account_number, ifsc_code, pan_number, student_name, roll_number, course_semester, mobile_number, chairman_name.
+9. For "submitted", supported keys are: ref_no, date, submitted_to, subject, chapter_name, code_no, event_schedule, event_venue, event_title, category, brief_description, objectives, target_audience, expected_participants, judges, financial_items (array of {item, amount}), student_head_name, student_head_roll, student_head_branch, student_head_mobile, student_secretary_name, student_secretary_roll, student_secretary_branch, student_secretary_mobile, faculty_co_chairman_name, faculty_co_chairman_designation, faculty_co_chairman_dept, faculty_co_chairman_mobile, faculty_chairman_name, faculty_chairman_designation, faculty_chairman_dept, faculty_chairman_mobile.
+10. For bank, PAN, phone, and signatory details, only return values explicitly provided by the user.
+11. Output MUST be valid JSON only, without markdown fences or additional commentary.
 """
 
 def is_llm_configured() -> bool:
