@@ -13,6 +13,12 @@ import {
 } from "../services/documentApi";
 import { getWorkflowActions } from "../utils/workflowActions.js";
 
+const WORKFLOW_STAGES = ["author", "reviewer", "approver", "template_admin", "admin"];
+const WORKFLOW_ROLE_LABELS = {
+  author: "Author", reviewer: "Reviewer", approver: "Approver",
+  template_admin: "Template Admin", admin: "System Admin", completed: "Complete",
+};
+
 function decodeAuditText(value) {
   if (value == null) return "";
   const text = String(value);
@@ -262,6 +268,9 @@ export default function VersionWorkflowPanel({ documentId, role }) {
 
   const activeDoc = documents.find(d => d.id === selectedDocId);
   const stageActions = getWorkflowActions(activeDoc, role);
+  const workflowStage = activeDoc?.workflow_stage || "author";
+  const isWorkflowFinished = workflowStage === "completed" || ["approved", "rejected"].includes(activeDoc?.status);
+  const activeStageIndex = WORKFLOW_STAGES.indexOf(workflowStage);
 
   useEffect(() => {
     if (stageActions.length && !stageActions.some((action) => action.value === targetStatus)) {
@@ -446,8 +455,20 @@ export default function VersionWorkflowPanel({ documentId, role }) {
                 {/* Section B: Approval Workflow Transition */}
                 <div className="workflow-panel">
                   <h4 style={{ fontSize: "0.95rem", fontWeight: "700", color: "#1e293b", margin: "0 0 10px 0" }}>
-                    🔄 Review & Approval Lifecycle (Stage: <span style={{ color: "#2563eb" }}>{(activeDoc.workflow_stage || "author").replaceAll("_", " ")}</span> · Status: <span style={{ color: "#2563eb" }}>{activeDoc.status}</span>)
+                    🔄 Review & Approval Lifecycle (Stage: <span style={{ color: "#2563eb" }}>{WORKFLOW_ROLE_LABELS[workflowStage] || workflowStage.replaceAll("_", " ")}</span> · Status: <span style={{ color: "#2563eb" }}>{activeDoc.status.replaceAll("_", " ")}</span>)
                   </h4>
+                  <ol aria-label="Document review stages" style={{ display: "flex", flexWrap: "wrap", gap: "6px", listStyle: "none", padding: 0, margin: "0 0 12px" }}>
+                    {WORKFLOW_STAGES.map((stage, index) => {
+                      const completed = activeDoc.status === "approved" || (activeStageIndex >= 0 && index < activeStageIndex);
+                      const current = !isWorkflowFinished && workflowStage === stage;
+                      return <li key={stage} aria-current={current ? "step" : undefined} style={{
+                        padding: "5px 9px", borderRadius: "999px", fontSize: "0.76rem", fontWeight: 700,
+                        color: current ? "#fff" : completed ? "#166534" : "#64748b",
+                        background: current ? "#6d4bc3" : completed ? "#dcfce7" : "rgba(148,163,184,.14)",
+                        border: current ? "1px solid #6d4bc3" : "1px solid rgba(148,163,184,.22)"
+                      }}>{completed ? "✓ " : current ? "● " : "○ "}{WORKFLOW_ROLE_LABELS[stage]}</li>;
+                    })}
+                  </ol>
                   {stageActions.length > 0 ? <form onSubmit={handleTransitionSubmit} style={{ display: "flex", gap: "10px", flexWrap: "wrap", alignItems: "center" }}>
                     <select
                       value={targetStatus}
@@ -461,6 +482,8 @@ export default function VersionWorkflowPanel({ documentId, role }) {
                       placeholder="Review comments or revision notes..."
                       value={comment}
                       onChange={(e) => setComment(e.target.value)}
+                      required={["changes_requested", "rejected"].includes(targetStatus)}
+                      aria-label={["changes_requested", "rejected"].includes(targetStatus) ? "Required review comments" : "Optional review comments"}
                       style={{ flex: 1, minWidth: "220px", padding: "8px 12px", borderRadius: "6px", border: "1px solid #cbd5e1", fontSize: "0.88rem" }}
                     />
                     <button type="submit" className="primary-btn" disabled={loading} style={{ padding: "8px 16px", fontSize: "0.88rem" }}>
@@ -473,7 +496,9 @@ export default function VersionWorkflowPanel({ documentId, role }) {
                         : "This version is marked approved in its existing workflow history.")
                       : activeDoc.status === "rejected"
                         ? "This document was rejected by the Approver. An Author can create a revised version to restart review."
-                        : `Waiting for the ${activeDoc.workflow_stage || "author"} stage. Authorized participants can view and download the current files above.`}
+                        : role === workflowStage
+                          ? `Your ${WORKFLOW_ROLE_LABELS[workflowStage] || workflowStage} role is up next. Choose a decision above to pass the document to the next stage.`
+                          : `Waiting for ${WORKFLOW_ROLE_LABELS[workflowStage] || workflowStage}. The document advances one role at a time: Author → Reviewer → Approver → Template Admin → System Admin.`}
                   </p>}
 
                   {/* Audit Logs */}
