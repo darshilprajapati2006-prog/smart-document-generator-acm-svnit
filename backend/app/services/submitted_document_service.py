@@ -21,14 +21,14 @@ from reportlab.platypus import (
 from app.core.config import settings
 from app.schemas.submitted_doc import SubmittedDocRequest
 from app.services.lead_signature_service import lead_signature_stream
-from PIL import Image
+from PIL import Image as PILImage
 
 
 def _pdf_signature_image(signature_data: str | None):
     signature_stream = lead_signature_stream(signature_data)
     if not signature_stream:
         return None
-    width_px, height_px = Image.open(signature_stream).size
+    width_px, height_px = PILImage.open(signature_stream).size
     signature_stream.seek(0)
     scale = min((1.8 * inch) / width_px, (0.55 * inch) / height_px)
     return ReportLabImage(signature_stream, width=width_px * scale, height=height_px * scale)
@@ -75,7 +75,7 @@ class SubmittedDocumentService:
         signature_stream = lead_signature_stream(signature_data)
         if not signature_stream:
             return
-        with Image.open(signature_stream) as signature_image:
+        with PILImage.open(signature_stream) as signature_image:
             ratio = signature_image.width / signature_image.height
             width = Inches(min(1.8, 1.8 if ratio >= 1 else 1.0 * ratio))
             height = Inches(min(0.55, 1.8 / ratio if ratio >= 1 else 1.0))
@@ -348,7 +348,7 @@ class SubmittedDocumentService:
         # 1. Trilingual Header Image
         header_img = settings.PROJECT_ROOT / "assets" / "branding" / "prize_receipt_header.png"
         if header_img.exists():
-            story.append(Image(str(header_img), width=182 * mm, height=32.47 * mm))
+            story.append(ReportLabImage(str(header_img), width=182 * mm, height=32.47 * mm))
             story.append(Spacer(1, 2 * mm))
 
         # 2. No and Date Row
